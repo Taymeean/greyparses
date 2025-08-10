@@ -1,16 +1,30 @@
+// prisma/schema.prisma
+
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
   provider = "sqlite"
-  url      = "file:./dev.db"
+  url      = env("DATABASE_URL") // e.g. file:./dev.db
 }
+
+/**
+ * ===================== Enums =====================
+ */
+
 enum Role {
   TANK
   HEALER
   MDPS
   RDPS
+}
+
+enum ArmorType {
+  CLOTH
+  LEATHER
+  MAIL
+  PLATE
 }
 
 enum LootType {
@@ -25,97 +39,132 @@ enum LootType {
 }
 
 enum AuditAction {
-  INVITE_CREATED
-  INVITE_ROTATED
-  INVITE_DISABLED
-  INVITE_CLAIMED
-  USER_CREATED
-  USER_ROLE_CHANGED
-  USER_KICKED
-  SESSION_CREATED
-  SESSION_REVOKED
-  PLAYER_CREATED
-  PLAYER_UPDATED
-  PLAYER_MERGED
   SR_CHOICE_SET
+  BOSS_KILL_TOGGLED
   SR_LOCKED
   SR_UNLOCKED
   SR_UNLOCKED_EXCEPT_KILLED
-  BOSS_KILL_TOGGLED
   WEEK_RESET
-  DATA_IMPORT
+  INVITE_CLAIMED
+  PLAYER_DEACTIVATED
+  PLAYER_REACTIVATED
 }
 
 enum TargetType {
-  PLAYER
-  USER
-  INVITE
   SR_CHOICE
   BOSS_KILL
   WEEK
-  RAID
-  SESSION
+  PLAYER
 }
 
-model Class {
-  id         Int      @id @default(autoincrement())
-  name       String   @unique
-  armorType  LootType
-  tierPrefix String
-   players    Player[]
-}
+/**
+ * ===================== Models =====================
+ */
 
-model Player {
-  id      Int    @id @default(autoincrement())
-  name    String @unique
-  role    Role
-  classId Int
-  class   Class  @relation(fields: [classId], references: [id])
-  srChoices SRChoice[]
-  logs      SRLog[]
-  users     User[]
-}
-// Update Raid to add back-relations
 model Raid {
-  id     Int    @id @default(autoincrement())
-  name   String @unique
+  id   Int    @id @default(autoincrement())
+  name String @unique
+
   bosses Boss[]
   weeks  Week[]
 }
-
-model Boss {
-  id     Int    @id @default(autoincrement())
-  name   String @unique
-  raidId Int
-  raid   Raid   @relation(fields: [raidId], references: [id])
-
-  kills   BossKill[]
-  choices SRChoice[]
-  drops   LootDrop[]
-}
-
 
 model Week {
   id        Int      @id @default(autoincrement())
   raidId    Int
   raid      Raid     @relation(fields: [raidId], references: [id])
   label     String   @unique
-  startDate DateTime @unique
-  @@unique([raidId, startDate])
-  kills   BossKill[]
-  choices SRChoice[]
-  logs    SRLog[]
-}
-model LootItem {
-  id      Int      @id @default(autoincrement())
-  name    String   @unique
-  type    LootType
-  slot    String?   
-  choices SRChoice[]
-  logs    SRLog[]
-  drops   LootDrop[]
+  startDate DateTime @default(now())
+
+  sRChoices SRChoice[]
+  bossKills BossKill[]
+  sRLogs    SRLog[]
+
+  @@index([raidId])
 }
 
+model Class {
+  id         Int       @id @default(autoincrement())
+  name       String    @unique
+  armorType  ArmorType
+  tierPrefix String
+
+  players Player[]
+}
+
+model Player {
+  id      Int     @id @default(autoincrement())
+  name    String  @unique
+  role    Role
+  active  Boolean @default(true) // soft-hide instead of deleting
+  classId Int
+  class   Class   @relation(fields: [classId], references: [id])
+
+  srChoices SRChoice[]
+  sRLogs    SRLog[]
+}
+
+model Boss {
+  id     Int    @id @default(autoincrement())
+  name   String
+  raidId Int
+  raid   Raid   @relation(fields: [raidId], references: [id])
+
+  lootDrops LootDrop[]
+  bossKills BossKill[]
+  sRChoices SRChoice[] // <-- inverse side for SRChoice.boss
+
+  @@unique([raidId, name])
+  @@index([raidId])
+}
+
+model LootItem {
+  id   Int      @id @default(autoincrement())
+  name String
+  type LootType
+  slot String?
+
+  lootDrops LootDrop[]
+  sRChoices SRChoice[]
+  sRLogs    SRLog[]
+
+  @@index([type])
+  @@index([name])
+}
+
+model LootDrop {
+  lootItemId Int
+  bossId     Int
+
+  lootItem LootItem @relation(fields: [lootItemId], references: [id])
+  boss     Boss     @relation(fields: [bossId], references: [id])
+
+  @@id([lootItemId, bossId])
+  @@index([bossId])
+}
+
+model SRChoice {
+  id         Int      @id @default(autoincrement())
+  weekId     Int
+  playerId   Int
+  lootItemId Int? // optional by design
+  bossId     Int? // optional by design
+  isTier     Boolean  @default(false)
+  locked     Boolean  @default(false)
+  notes      String?
+  updatedAt  DateTime @updatedAt
+
+  week     Week      @relation(fields: [weekId], references: [id])
+  player   Player    @relation(fields: [playerId], references: [id])
+  lootItem LootItem? @relation(fields: [lootItemId], references: [id]) // <-- optional
+  boss     Boss?     @relation(fields: [bossId], references: [id]) // <-- optional
+
+  @@unique([weekId, playerId])
+  @@index([weekId])
+  @@index([playerId])
+  @@index([lootItemId])
+  @@index([bossId])
+}
 
 model BossKill {
   id     Int     @id @default(autoincrement())
@@ -127,25 +176,8 @@ model BossKill {
   boss Boss @relation(fields: [bossId], references: [id])
 
   @@unique([weekId, bossId])
-}
-
-model SRChoice {
-  id         Int       @id @default(autoincrement())
-  weekId     Int
-  playerId   Int
-  lootItemId Int?
-  bossId     Int?
-  isTier     Boolean   @default(false)
-  locked     Boolean   @default(false)
-  notes      String?
-  updatedAt  DateTime  @updatedAt
-
-  week     Week      @relation(fields: [weekId], references: [id])
-  player   Player    @relation(fields: [playerId], references: [id])
-  lootItem LootItem? @relation(fields: [lootItemId], references: [id])
-  boss     Boss?     @relation(fields: [bossId], references: [id])
-
-  @@unique([weekId, playerId])
+  @@index([weekId])
+  @@index([bossId])
 }
 
 model SRLog {
@@ -153,42 +185,20 @@ model SRLog {
   weekId     Int
   playerId   Int
   lootItemId Int
-  at         DateTime @default(now())
+  createdAt  DateTime @default(now())
 
   week     Week     @relation(fields: [weekId], references: [id])
   player   Player   @relation(fields: [playerId], references: [id])
   lootItem LootItem @relation(fields: [lootItemId], references: [id])
-}
-model User {
-  id          Int      @id @default(autoincrement())
-  displayName String
-  role        String   @default("member") // app roles: viewer/member/officer/admin
-  playerId    Int?     @unique
-  player      Player?  @relation(fields: [playerId], references: [id])
-  sessions    Session[]
-}
 
-model Invite {
-  id        Int      @id @default(autoincrement())
-  token     String   @unique
-  role      String   @default("member") // role granted on claim
-  maxUses   Int?
-  usedCount Int      @default(0)
-  enabled   Boolean  @default(true)
-  createdAt DateTime @default(now())
-}
-
-model Session {
-  id        Int      @id @default(autoincrement())
-  userId    Int
-  token     String   @unique
-  expiresAt DateTime
-  user      User     @relation(fields: [userId], references: [id])
+  @@index([weekId])
+  @@index([playerId])
+  @@index([lootItemId])
 }
 
 model AuditLog {
-  id           Int        @id @default(autoincrement())
-  createdAt    DateTime   @default(now())
+  id           Int         @id @default(autoincrement())
+  createdAt    DateTime    @default(now())
   actorUserId  Int?
   actorDisplay String?
   action       AuditAction
@@ -199,16 +209,7 @@ model AuditLog {
   before       Json?
   after        Json?
   meta         Json?
-  @@index([createdAt])
-  @@index([weekId, createdAt])
-  @@index([targetType, targetId])
-}
 
-model LootDrop {
-  id         Int       @id @default(autoincrement())
-  lootItemId Int
-  bossId     Int
-  lootItem   LootItem  @relation(fields: [lootItemId], references: [id])
-  boss       Boss      @relation(fields: [bossId], references: [id])
-  @@unique([lootItemId, bossId])
+  @@index([weekId, createdAt, id])
+  @@index([action, createdAt])
 }

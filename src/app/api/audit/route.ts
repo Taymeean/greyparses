@@ -2,6 +2,7 @@
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { AuditAction, TargetType } from '@prisma/client';
+import { isOfficer } from '@/lib/auth';
 
 function s(q: URLSearchParams, k: string) {
   const v = q.get(k);
@@ -18,6 +19,11 @@ function enumHas<T extends object>(e: T, key: string) {
 }
 
 export async function GET(req: Request) {
+  // officer gate
+  if (!isOfficer()) {
+    return NextResponse.json({ error: 'Officer only' }, { status: 403 });
+  }
+
   try {
     const url = new URL(req.url);
     const q = url.searchParams;
@@ -25,7 +31,7 @@ export async function GET(req: Request) {
     const action = s(q, 'action');
     const targetType = s(q, 'targetType');
     const weekId = n(q, 'weekId');
-    const actor = s(q, 'actor'); // substring, case-insensitive
+    const actor = s(q, 'actor');
     const from = s(q, 'from');
     const to = s(q, 'to');
 
@@ -34,19 +40,15 @@ export async function GET(req: Request) {
 
     const where: any = {};
     if (action) {
-      if (!enumHas(AuditAction, action)) {
-        return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
-      }
+      if (!enumHas(AuditAction, action)) return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
       where.action = action;
     }
     if (targetType) {
-      if (!enumHas(TargetType, targetType)) {
-        return NextResponse.json({ error: 'Invalid targetType' }, { status: 400 });
-      }
+      if (!enumHas(TargetType, targetType)) return NextResponse.json({ error: 'Invalid targetType' }, { status: 400 });
       where.targetType = targetType;
     }
     if (typeof weekId === 'number') where.weekId = weekId;
-    if (actor) where.actorDisplay = { contains: actor, mode: 'insensitive' as const };
+    if (actor) where.actorDisplay = { contains: actor };
     if (from || to) {
       where.createdAt = {};
       if (from) where.createdAt.gte = new Date(from);
@@ -62,7 +64,7 @@ export async function GET(req: Request) {
 
     const items = await prisma.auditLog.findMany({
       where,
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], // stable
       take: limit + 1,
       ...cursorClause,
     });

@@ -3,13 +3,17 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { getCurrentWeekStartNY, formatWeekLabelNY, getNextWeekStartFrom } from '@/lib/week';
 import { AuditAction } from '@prisma/client';
-import { getActorDisplay } from '@/lib/auth';
+import { getActorDisplay, isOfficer } from '@/lib/auth';
 
 export async function POST() {
+  // officer gate
+  if (!isOfficer()) {
+    return NextResponse.json({ error: 'Officer only' }, { status: 403 });
+  }
+
   // resolve current (closing) week by label
   const currentStart = getCurrentWeekStartNY();
   const currentLabel = formatWeekLabelNY(currentStart);
-
   const current = await prisma.week.findUnique({
     where: { label: currentLabel },
     select: { id: true, raidId: true, startDate: true, label: true },
@@ -24,7 +28,7 @@ export async function POST() {
     prisma.bossKill.count({ where: { weekId: current.id, killed: true } }),
   ]);
 
-  // compute/create the next week (7 days after current.startDate)
+  // compute/create next week
   const nextStart = getNextWeekStartFrom(current.startDate);
   const nextLabel = formatWeekLabelNY(nextStart);
 
@@ -47,7 +51,7 @@ export async function POST() {
       weekId: current.id,
       before: { label: current.label, choicesCount, killsTrueCount },
       after: { nextWeekId: next.id, nextLabel: next.label, created },
-      actorDisplay: getActorDisplay(), // << uses cookie actor
+      actorDisplay: getActorDisplay(),
     },
   });
 
@@ -58,9 +62,6 @@ export async function POST() {
     nextWeekId: next.id,
     nextLabel,
     created,
-    closedCounts: {
-      srChoices: choicesCount,
-      bossesKilled: killsTrueCount,
-    },
+    closedCounts: { srChoices: choicesCount, bossesKilled: killsTrueCount },
   });
 }

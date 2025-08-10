@@ -1,19 +1,20 @@
-// src/app/api/lock/route.ts
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@/lib/db';
 import { getCurrentWeekStartNY, formatWeekLabelNY } from '@/lib/week';
 import { AuditAction } from '@prisma/client';
-import { getActorDisplay } from '@/lib/auth';
+import { getActorDisplay, isOfficer } from '@/lib/auth';
 
-const BodySchema = z.object({
-  lock: z.boolean(), // true = lock all, false = unlock all
-});
+const BodySchema = z.object({ lock: z.boolean() });
 
 export async function POST(req: Request) {
+  // officer gate
+  if (!isOfficer()) {
+    return NextResponse.json({ error: 'Officer only' }, { status: 403 });
+  }
+
   // parse
-  let json: unknown;
-  try { json = await req.json(); } catch { return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 }); }
+  const json = await req.json().catch(() => null);
   const parsed = BodySchema.safeParse(json);
   if (!parsed.success) return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   const { lock } = parsed.data;
@@ -39,7 +40,7 @@ export async function POST(req: Request) {
       weekId: week.id,
       before: null,
       after: { locked: lock, affected: result.count },
-      actorDisplay: getActorDisplay(), // << uses cookie actor
+      actorDisplay: getActorDisplay(),
       meta: { affected: result.count },
     },
   });

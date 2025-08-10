@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 
 type AuditItem = {
   id: number; createdAt: string; actorDisplay: string | null;
@@ -21,6 +22,7 @@ function formatNY(ts: string) {
 }
 
 export default function AuditPage() {
+  const router = useRouter();
   const [rows, setRows] = useState<AuditItem[]>([]);
   const [nextCursor, setNextCursor] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
@@ -30,6 +32,7 @@ export default function AuditPage() {
   const [weeks, setWeeks] = useState<Week[]>([]);
   const [weekId, setWeekId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [needsOfficer, setNeedsOfficer] = useState(false); // 👈 NEW
 
   // load weeks once
   useEffect(() => {
@@ -37,10 +40,11 @@ export default function AuditPage() {
       .then(r => r.ok ? r.json() : Promise.reject(r.statusText))
       .then((ws: Week[]) => {
         setWeeks(ws);
-        if (ws.length && weekId === null) setWeekId(ws[0].id); // default to latest week
+        if (ws.length && weekId === null) setWeekId(ws[0].id);
       })
-      .catch(() => {}); // ignore
-  }, []); // eslint-disable-line
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const baseUrl = useMemo(() => {
     const params = new URLSearchParams();
@@ -52,9 +56,10 @@ export default function AuditPage() {
   }, [pageSize, weekId, actor, action]);
 
   async function loadFirstPage() {
-    setLoading(true); setError(null);
+    setLoading(true); setError(null); setNeedsOfficer(false);
     try {
       const res = await fetch(baseUrl, { cache: 'no-store' });
+      if (res.status === 403) { setNeedsOfficer(true); setRows([]); setNextCursor(null); return; }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data: ApiPage = await res.json();
       setRows(data.items);
@@ -71,6 +76,7 @@ export default function AuditPage() {
     setLoading(true); setError(null);
     try {
       const res = await fetch(`${baseUrl}&cursor=${nextCursor}`, { cache: 'no-store' });
+      if (res.status === 403) { setNeedsOfficer(true); return; }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data: ApiPage = await res.json();
       setRows(prev => [...prev, ...data.items]);
@@ -82,12 +88,38 @@ export default function AuditPage() {
     }
   }
 
-  // load page 1 when filters change
   useEffect(() => { loadFirstPage(); }, [baseUrl]);
+
+  if (needsOfficer) {
+    return (
+      <div className="p-6 max-w-xl mx-auto space-y-4">
+        <h1 className="text-2xl font-semibold">Audit (Officer only)</h1>
+        <div className="p-4 border rounded bg-amber-50">
+          <p className="text-sm text-amber-900">
+            You need officer access to view logs. Sign in below.
+          </p>
+          <button
+            onClick={() => router.push('/officer')}
+            className="mt-3 px-4 py-2 rounded bg-black text-white"
+          >
+            Go to Officer Login
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="p-6 space-y-4">
-      <h1 className="text-2xl font-semibold">Audit Viewer (MVP)</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-semibold">Audit Viewer</h1>
+        <button
+          onClick={() => router.push('/officer')}
+          className="text-sm underline"
+        >
+          Officer login
+        </button>
+      </div>
 
       <div className="flex flex-wrap gap-3 items-end">
         <div className="flex flex-col">
@@ -98,9 +130,7 @@ export default function AuditPage() {
             onChange={(e) => setWeekId(e.target.value ? Number(e.target.value) : null)}
           >
             {weeks.length === 0 && <option value="">(loading…)</option>}
-            {weeks.map(w => (
-              <option key={w.id} value={w.id}>{w.label}</option>
-            ))}
+            {weeks.map(w => <option key={w.id} value={w.id}>{w.label}</option>)}
             <option value="">All weeks</option>
           </select>
         </div>
@@ -109,7 +139,7 @@ export default function AuditPage() {
           <label className="text-sm text-gray-500">Actor contains</label>
           <input
             className="border rounded px-3 py-1"
-            placeholder="anonymous"
+            placeholder="player:Skullblaster / officer"
             value={actor}
             onChange={(e) => setActor(e.target.value)}
           />

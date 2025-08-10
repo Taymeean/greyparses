@@ -1,4 +1,3 @@
-// src/app/api/sr/route.ts
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { getCurrentWeekStartNY, formatWeekLabelNY } from '@/lib/week';
@@ -7,10 +6,7 @@ export async function GET(req: Request) {
   const url = new URL(req.url);
   const weekIdParam = url.searchParams.get('weekId');
 
-  // Resolve target week
-  let week:
-    | { id: number; label: string }
-    | null = null;
+  let week: { id: number; label: string } | null = null;
 
   if (weekIdParam) {
     const weekId = Number(weekIdParam);
@@ -34,13 +30,13 @@ export async function GET(req: Request) {
     week = w;
   }
 
-  // Fetch all players + their SR for this week
   const players = await prisma.player.findMany({
     orderBy: { name: 'asc' },
     select: {
       id: true,
       name: true,
       role: true,
+      active: true, // 👈 include active
       class: { select: { id: true, name: true, armorType: true, tierPrefix: true } },
       srChoices: {
         where: { weekId: week.id },
@@ -64,6 +60,7 @@ export async function GET(req: Request) {
       playerId: p.id,
       playerName: p.name,
       role: p.role,
+      active: p.active, // 👈 expose to UI
       class: p.class,
       choice: choice && {
         id: choice.id,

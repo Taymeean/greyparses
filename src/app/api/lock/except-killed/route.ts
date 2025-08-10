@@ -3,9 +3,14 @@ import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
 import { getCurrentWeekStartNY, formatWeekLabelNY } from '@/lib/week';
 import { AuditAction } from '@prisma/client';
-import { getActorDisplay } from '@/lib/auth';
+import { getActorDisplay, isOfficer } from '@/lib/auth';
 
 export async function POST() {
+  // officer gate
+  if (!isOfficer()) {
+    return NextResponse.json({ error: 'Officer only' }, { status: 403 });
+  }
+
   // current week
   const start = getCurrentWeekStartNY();
   const label = formatWeekLabelNY(start);
@@ -22,19 +27,11 @@ export async function POST() {
   // unlock logic
   let affected = 0;
   if (killedIds.length === 0) {
-    // none killed → unlock all
-    const res = await prisma.sRChoice.updateMany({
-      where: { weekId: week.id },
-      data: { locked: false },
-    });
+    const res = await prisma.sRChoice.updateMany({ where: { weekId: week.id }, data: { locked: false } });
     affected = res.count;
   } else {
-    // unlock rows whose boss is NOT killed (or no boss selected)
     const res = await prisma.sRChoice.updateMany({
-      where: {
-        weekId: week.id,
-        OR: [{ bossId: null }, { bossId: { notIn: killedIds } }],
-      },
+      where: { weekId: week.id, OR: [{ bossId: null }, { bossId: { notIn: killedIds } }] },
       data: { locked: false },
     });
     affected = res.count;
@@ -48,7 +45,7 @@ export async function POST() {
       weekId: week.id,
       before: null,
       after: { unlocked: affected, killedBossIds: killedIds },
-      actorDisplay: getActorDisplay(), // << uses cookie actor
+      actorDisplay: getActorDisplay(),
       meta: { unlocked: affected, killedBossIds: killedIds },
     },
   });
