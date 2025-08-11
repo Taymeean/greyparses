@@ -245,7 +245,7 @@ export default function SRPage() {
                     <td>
                       {isMe ? (
                         <select
-                          className="border rounded px-2 py-1 max-w-[22rem] bg-white text-gray-900 disabled:bg-gray-100 disabled:text-gray-500"
+                          className="border rounded px-2 py-1 max-w-[22rem]"
                           value={editItemId}
                           onChange={(e) => setEditItemId(e.target.value ? Number(e.target.value) : '')}
                           disabled={locked}
@@ -264,7 +264,7 @@ export default function SRPage() {
                     <td>
                       {isMe ? (
                         <select
-                          className="border rounded px-2 py-1 bg-white text-gray-900 disabled:bg-gray-100 disabled:text-gray-500"
+                          className="border rounded px-2 py-1"
                           value={editBossId}
                           onChange={(e) => setEditBossId(e.target.value ? Number(e.target.value) : '')}
                           disabled={locked}
@@ -289,7 +289,7 @@ export default function SRPage() {
                     <td>
                       {isMe ? (
                         <input
-                          className="border rounded px-2 py-1 w-64 bg-white text-gray-900 placeholder-gray-400 disabled:bg-gray-100 disabled:text-gray-500"
+                          className="border rounded px-2 py-1 w-64"
                           value={editNotes}
                           onChange={(e) => setEditNotes(e.target.value)}
                           disabled={locked}

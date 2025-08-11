@@ -1,16 +1,24 @@
-import { PrismaClient, LootType } from '@prisma/client';
-import { DateTime } from 'luxon';
+// prisma/seed.ts
+import { PrismaClient, ArmorType } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
-function getCurrentWeekStartNY(): Date {
-  const now = DateTime.now().setZone('America/New_York');
-  const dow = now.weekday; // Mon=1..Sun=7
-  const delta = dow >= 2 ? (dow - 2) : (7 - (2 - dow)); // last Tuesday
-  return now.minus({ days: delta }).startOf('day').toJSDate();
-}
-function formatWeekLabelNY(d: Date): string {
-  return 'Week of ' + DateTime.fromJSDate(d).setZone('America/New_York').toFormat('LLL d, yyyy');
+function currentWeekLabelNY() {
+  // Build a Date in New York time so the "last Tuesday" math is correct
+  const now = new Date();
+  const nyNow = new Date(now.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+  const day = nyNow.getDay(); // 0=Sun ... 2=Tue
+  const diff = day >= 2 ? day - 2 : 6 + day; // days since last Tuesday
+  const lastTue = new Date(nyNow);
+  lastTue.setDate(nyNow.getDate() - diff);
+
+  const label = 'Week of ' + lastTue.toLocaleDateString('en-US', {
+    timeZone: 'America/New_York',
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  });
+  return label;
 }
 
 async function main() {
@@ -21,59 +29,70 @@ async function main() {
     create: { name: 'Manaforge Omega' },
   });
 
-  // Bosses
-  const bosses = [
-    "Plexus Sentinel",
-    "Loom'ithar",
-    "Soulbinder Naazindhri",
-    "Forgeweaver Araz",
-    "The Soul Hunters",
-    "Fractillus",
-    "Nexus-King Salhadaar",
-    "Dimensius, the All-Devouring",
+  // Classes
+  const classes: Array<{ name: string; armorType: ArmorType; tierPrefix: string }> = [
+    { name: 'Mage',         armorType: 'CLOTH',  tierPrefix: 'Mystic' },
+    { name: 'Priest',       armorType: 'CLOTH',  tierPrefix: 'Venerated' },
+    { name: 'Warlock',      armorType: 'CLOTH',  tierPrefix: 'Dreadful' },
+    { name: 'Druid',        armorType: 'LEATHER',tierPrefix: 'Mystic' },
+    { name: 'Demon Hunter', armorType: 'LEATHER',tierPrefix: 'Dreadful' },
+    { name: 'Monk',         armorType: 'LEATHER',tierPrefix: 'Zenith' },
+    { name: 'Rogue',        armorType: 'LEATHER',tierPrefix: 'Zenith' },
+    { name: 'Hunter',       armorType: 'MAIL',   tierPrefix: 'Mystic' },
+    { name: 'Evoker',       armorType: 'MAIL',   tierPrefix: 'Zenith' },
+    { name: 'Shaman',       armorType: 'MAIL',   tierPrefix: 'Venerated' },
+    { name: 'Death Knight', armorType: 'PLATE',  tierPrefix: 'Dreadful' },
+    { name: 'Paladin',      armorType: 'PLATE',  tierPrefix: 'Venerated' },
+    { name: 'Warrior',      armorType: 'PLATE',  tierPrefix: 'Zenith' },
   ];
-  for (const name of bosses) {
-    await prisma.boss.upsert({
-      where: { name },
-      update: {},
-      create: { name, raidId: raid.id },
+
+  for (const c of classes) {
+    await prisma.class.upsert({
+      where: { name: c.name },
+      update: { armorType: c.armorType, tierPrefix: c.tierPrefix },
+      create: c,
     });
   }
 
-  // Classes
-  const classes: Array<[string, LootType, string]> = [
-    ['Mage', LootType.CLOTH, 'Mystic'],
-    ['Priest', LootType.CLOTH, 'Venerated'],
-    ['Warlock', LootType.CLOTH, 'Dreadful'],
-    ['Druid', LootType.LEATHER, 'Mystic'],
-    ['Demon Hunter', LootType.LEATHER, 'Dreadful'],
-    ['Monk', LootType.LEATHER, 'Zenith'],
-    ['Rogue', LootType.LEATHER, 'Zenith'],
-    ['Hunter', LootType.MAIL, 'Mystic'],
-    ['Evoker', LootType.MAIL, 'Zenith'],
-    ['Shaman', LootType.MAIL, 'Venerated'],
-    ['Death Knight', LootType.PLATE, 'Dreadful'],
-    ['Paladin', LootType.PLATE, 'Venerated'],
-    ['Warrior', LootType.PLATE, 'Zenith'],
+  // Bosses (use composite unique: raidId + name)
+  const bosses = [
+    'Plexus Sentinel',
+    "Loom'ithar",
+    'Soulbinder Naazindhri',
+    'Forgeweaver Araz',
+    'The Soul Hunters',
+    'Fractillus',
+    'Nexus-King Salhadaar',
+    'Dimensius, the All-Devouring',
   ];
-  for (const [name, armorType, tierPrefix] of classes) {
-    await prisma.class.upsert({
-      where: { name },
+  for (const name of bosses) {
+    await prisma.boss.upsert({
+      where: { raidId_name: { raidId: raid.id, name } },
       update: {},
-      create: { name, armorType, tierPrefix },
+      create: { raidId: raid.id, name },
     });
   }
 
   // Current week
-  const start = getCurrentWeekStartNY();
-  const label = formatWeekLabelNY(start);
+  const label = currentWeekLabelNY();
   await prisma.week.upsert({
     where: { label },
     update: {},
-    create: { raidId: raid.id, label, startDate: start },
+    create: {
+      raidId: raid.id,
+      label,
+      startDate: new Date(),
+    },
   });
 
-  console.log('Seeded: raid, bosses, classes, current week →', label);
+  console.log(`Seeded: raid, bosses, classes, current week → ${label}`);
 }
 
-main().finally(() => prisma.$disconnect());
+main()
+  .catch((e) => {
+    console.error(e);
+    process.exit(1);
+  })
+  .finally(async () => {
+    await prisma.$disconnect();
+  });

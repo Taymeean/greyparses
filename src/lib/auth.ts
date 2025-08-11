@@ -54,10 +54,11 @@ function officerMarker(): string {
   return signData('officer:marker:v1');
 }
 
-export function isOfficer(): boolean {
-  const v = cookies().get(OFFICER_COOKIE)?.value;
-  return !!v && v === officerMarker();
+export function isOfficer() {
+  const c = cookies();
+  return c.get('gp_officer')?.value === '1' || c.get('officer')?.value === '1';
 }
+
 
 // actor for audit logs: prefer officer, then member, else anonymous
 export function getActorDisplay(): string {
