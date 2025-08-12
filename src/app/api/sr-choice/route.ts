@@ -2,108 +2,192 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { prisma } from '@/lib/db';
+import { readSession, getActorDisplay } from '@/lib/auth';
 import { getCurrentWeekStartNY, formatWeekLabelNY } from '@/lib/week';
-import { validateSRChoice } from '@/lib/lootRules';
-import { getActorDisplay } from '@/lib/auth';
-import { AuditAction } from '@prisma/client';
 
-const BodySchema = z.object({
+const Body = z.object({
   playerId: z.number().int().positive(),
-  lootItemId: z.number().int().positive().optional(), // omit to clear SR
-  bossId: z.number().int().positive().optional(),     // optional
-  notes: z.string().max(500).optional(),
+  lootItemId: z.number().int().positive().nullable().optional(), // allow clearing
+  bossId: z.number().int().positive().nullable().optional(),
+  notes: z.string().max(200).optional(),
 });
 
+const UNIVERSAL_TYPES = new Set(['ACCESSORIES', 'TRINKET', 'WEAPON']);
+const ARMOR_TYPES = new Set(['CLOTH', 'LEATHER', 'MAIL', 'PLATE']);
+const TIER_TYPE = 'TIER_SET';
+
 export async function POST(req: Request) {
-  // 1) parse + validate body
-  let json: unknown = null;
-  try {
-    json = await req.json();
-  } catch {
-    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
-  }
-  const parsed = BodySchema.safeParse(json);
+  // 1) Parse
+  const json = await req.json().catch(() => null);
+  const parsed = Body.safeParse(json);
   if (!parsed.success) {
-    return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
+    return NextResponse.json({ error: 'bad_request' }, { status: 400 });
   }
-  const { playerId, lootItemId, bossId, notes } = parsed.data;
+  const { playerId, lootItemId: rawLoot, bossId: rawBoss, notes } = parsed.data;
+  const lootItemId = rawLoot ?? null;
+  const bossId = rawBoss ?? null;
 
-  // 2) find current week by label
-  const start = getCurrentWeekStartNY();
-  const label = formatWeekLabelNY(start);
-  const week = await prisma.week.findUnique({ where: { label } });
-  if (!week) {
-    return NextResponse.json({ error: 'Current week not found. Seed/init first.' }, { status: 500 });
-  }
+  // 2) Current week (must already exist; created by Reset Week)
+  const label = formatWeekLabelNY(getCurrentWeekStartNY());
+  const week = await prisma.week.findUnique({ where: { label }, select: { id: true, raidId: true } });
+  if (!week) return NextResponse.json({ error: 'current_week_missing' }, { status: 404 });
 
-  // 3) read existing choice (for lock + before/after diff)
-  const existing = await prisma.sRChoice.findUnique({
-    where: { weekId_playerId: { weekId: week.id, playerId } },
+  // 3) Player & class
+  const player = await prisma.player.findUnique({
+    where: { id: playerId },
+    select: { id: true, name: true, role: true, active: true, class: { select: { id: true, name: true, armorType: true, tierPrefix: true } } },
   });
-  if (existing?.locked) {
-    return NextResponse.json({ error: 'SR is locked for this player.' }, { status: 403 });
+  if (!player || !player.active) {
+    return NextResponse.json({ error: 'invalid_player' }, { status: 404 });
   }
 
-  // 4) guardrails: class rules (armor/tier/universal) + boss drop linkage
-  const validation = await validateSRChoice(playerId, lootItemId, bossId);
-  if (!validation.ok) {
-    return NextResponse.json({ error: validation.message, code: validation.code }, { status: 400 });
+  // 4) If an SR row exists and is locked, block edits
+  const existingRow = await prisma.sRChoice.findUnique({
+    where: { weekId_playerId: { weekId: week.id, playerId } },
+    select: { locked: true },
+  });
+  if (existingRow?.locked) {
+    return NextResponse.json({ error: 'locked' }, { status: 403 });
   }
-  const isTier = validation.isTier;
 
-  // 5) upsert + conditional SRLog + AuditLog
+  // 5) Validate loot item (if provided), compute isTier
+  let loot: { id: number; name: string; type: string; slot: string } | null = null;
+  let isTier = false;
+
+  if (lootItemId !== null) {
+    loot = await prisma.lootItem.findUnique({
+      where: { id: lootItemId },
+      select: { id: true, name: true, type: true, slot: true },
+    });
+    if (!loot) {
+      return NextResponse.json({ error: 'invalid_item' }, { status: 400 });
+    }
+
+    // Class guardrails
+    const itemType = (loot.type || '').toUpperCase();
+    const playerArmor = (player.class?.armorType || '').toUpperCase();
+    const tierPrefix = (player.class?.tierPrefix || '').trim();
+
+    const allowed =
+      UNIVERSAL_TYPES.has(itemType) ||
+      (ARMOR_TYPES.has(itemType) && itemType === playerArmor) ||
+      itemType === TIER_TYPE ||
+      (tierPrefix && loot.name.startsWith(tierPrefix));
+
+    if (!allowed) {
+      return NextResponse.json({ error: 'item_not_usable_by_class' }, { status: 400 });
+    }
+
+    // Compute Tier flag
+    isTier = itemType === TIER_TYPE || (tierPrefix && loot.name.startsWith(tierPrefix));
+  } else {
+    // clearing SR -> isTier false
+    isTier = false;
+  }
+
+  // 6) Validate boss (if provided)
+  let boss: { id: number; name: string } | null = null;
+  if (bossId !== null) {
+    boss = await prisma.boss.findUnique({
+      where: { id: bossId },
+      select: { id: true, name: true, raidId: true },
+    });
+    if (!boss || boss.raidId !== week.raidId) {
+      return NextResponse.json({ error: 'invalid_boss' }, { status: 400 });
+    }
+  }
+
+  // 7) Optional: if both boss & item given, ensure this boss drops the item (if LootDrop table exists)
+  if (boss && loot) {
+    const drop = await prisma.lootDrop.findFirst({
+      where: { bossId: boss.id, lootItemId: loot.id },
+      select: { bossId: true },
+    });
+    if (!drop) {
+      return NextResponse.json({ error: 'boss_does_not_drop_item' }, { status: 400 });
+    }
+  }
+
+  // 8) Transaction: upsert SR choice, log, audit
   const result = await prisma.$transaction(async (tx) => {
+    // previous SR (for before)
+    const prev = await tx.sRChoice.findUnique({
+      where: { weekId_playerId: { weekId: week.id, playerId } },
+      select: { lootItemId: true, bossId: true, notes: true, isTier: true },
+    });
+
+    // upsert
     const updated = await tx.sRChoice.upsert({
       where: { weekId_playerId: { weekId: week.id, playerId } },
       update: {
-        lootItemId: lootItemId ?? null,
-        bossId: bossId ?? null,
+        lootItemId,
+        bossId,
         notes: typeof notes === 'string' ? notes : undefined,
         isTier,
       },
       create: {
         weekId: week.id,
         playerId,
-        lootItemId: lootItemId ?? null,
-        bossId: bossId ?? null,
+        lootItemId,
+        bossId,
         notes: typeof notes === 'string' ? notes : undefined,
         isTier,
       },
     });
 
-    // only log when loot item actually changes to a non-empty value
-    const itemChanged = existing?.lootItemId !== lootItemId && !!lootItemId;
-    if (itemChanged) {
-      await tx.sRLog.create({
-        data: {
-          weekId: week.id,
-          playerId,
-          lootItemId: lootItemId!,
-        },
-      });
+    // SR log (optional but nice)
+    await tx.sRLog.create({
+      data: {
+        weekId: week.id,
+        playerId,
+        lootItemId: updated.lootItemId,
+        // bossId: updated.bossId,  // ← REMOVE this line
+        // isTier: updated.isTier,  //
+        // notes: updated.notes ?? null,  //
+      },
+    });
+
+
+    // Human-readable audit line
+    function buildDisplay() {
+      const who = player.name ?? `player:${playerId}`;
+      if (!updated.lootItemId && !updated.bossId && !updated.notes) return `SR: ${who} cleared`;
+      const bits: string[] = [`SR: ${who}`];
+      if (loot) bits.push(`Item: ${loot.name}`);
+      if (boss) bits.push(`Boss: ${boss.name}`);
+      if (updated.isTier) bits.push('Tier');
+      if (typeof updated.notes === 'string' && updated.notes.trim()) bits.push(`Notes: ${updated.notes.trim()}`);
+      return bits.join(' • ');
     }
+
+    const before = prev
+      ? { lootItemId: prev.lootItemId, bossId: prev.bossId, notes: prev.notes, isTier: prev.isTier }
+      : null;
+
+    const after = {
+      lootItemId: updated.lootItemId,
+      bossId: updated.bossId,
+      notes: updated.notes,
+      isTier: updated.isTier,
+    };
+
+    const sess = readSession();
 
     await tx.auditLog.create({
       data: {
-        action: AuditAction.SR_CHOICE_SET,
+        action: 'SR_CHOICE_SET',
         targetType: 'SR_CHOICE',
         targetId: `week:${week.id}/player:${playerId}`,
         weekId: week.id,
-        before: existing
-          ? {
-              lootItemId: existing.lootItemId ?? null,
-              bossId: existing.bossId ?? null,
-              notes: existing.notes ?? null,
-              isTier: existing.isTier,
-            }
-          : null,
-        after: {
-          lootItemId: lootItemId ?? null,
-          bossId: bossId ?? null,
-          notes: notes ?? null,
-          isTier,
+        before,
+        after,
+        actorDisplay: getActorDisplay(),
+        meta: {
+          display: buildDisplay(),
+          lootItemId: updated.lootItemId ?? null,
+          bossId: updated.bossId ?? null,
+          actorPlayerId: sess?.playerId ?? null,
         },
-        actorDisplay: getActorDisplay(), // << now uses cookie actor
       },
     });
 

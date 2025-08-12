@@ -49,15 +49,16 @@ export async function POST(req: Request) {
   }
 
   // audit
+  const s = readSession();
   await prisma.auditLog.create({
     data: {
-      action: AuditAction.BOSS_KILL_TOGGLED,
+      action: AuditAction.BOSS_KILL_TOGGLED, // etc.
       targetType: 'BOSS_KILL',
       targetId: `week:${week.id}/boss:${bossId}`,
       weekId: week.id,
-      before,
-      after,
+      before, after,
       actorDisplay: getActorDisplay(),
+      meta: s?.playerId ? { actorPlayerId: s.playerId } : undefined, // 👈
     },
   });
 

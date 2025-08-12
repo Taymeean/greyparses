@@ -41,10 +41,28 @@ export function verifySession(token: string): SessionPayload | null {
   }
 }
 
-export function readSession(): SessionPayload | null {
-  const token = cookies().get(COOKIE_NAME)?.value;
-  if (!token) return null;
-  return verifySession(token);
+// --- PATCH: make member cookie robust ---
+export function readSession() {
+  const c = cookies();
+
+  // Prefer our new cookie; accept old name for compatibility
+  const raw =
+    c.get('gp_member')?.value ??
+    c.get('member')?.value ??
+    null;
+
+  if (!raw) return null;
+
+  // Some runtimes URL-encode cookie values; try both
+  try {
+    return JSON.parse(raw);
+  } catch {
+    try {
+      return JSON.parse(decodeURIComponent(raw));
+    } catch {
+      return null;
+    }
+  }
 }
 
 // ===== officer cookie =====
@@ -54,18 +72,49 @@ function officerMarker(): string {
   return signData('officer:marker:v1');
 }
 
+// --- PATCH: recognize either officer cookie name ---
 export function isOfficer() {
   const c = cookies();
-  return c.get('gp_officer')?.value === '1' || c.get('officer')?.value === '1';
+  return (
+    c.get('gp_officer')?.value === '1' ||
+    c.get('officer')?.value === '1'
+  );
 }
 
+// Use player session if present, even for officers.
+// Fall back to a manual alias, then plain "officer".
+export function getActorDisplay() {
+  const c = cookies();
 
-// actor for audit logs: prefer officer, then member, else anonymous
-export function getActorDisplay(): string {
-  if (isOfficer()) return 'officer';
-  const s = readSession();
-  return s ? `player:${s.name}` : 'anonymous';
+  // read player session (new + old cookie names)
+  const raw =
+    c.get('gp_member')?.value ??
+    c.get('member')?.value ??
+    null;
+
+  let sess: { playerId?: number; name?: string } | null = null;
+  if (raw) {
+    try { sess = JSON.parse(raw); }
+    catch { try { sess = JSON.parse(decodeURIComponent(raw)); } catch { /* ignore */ } }
+  }
+
+  const isOfficer =
+    c.get('gp_officer')?.value === '1' ||
+    c.get('officer')?.value === '1';
+
+  if (isOfficer) {
+    const alias = c.get('gp_officer_name')?.value; // optional manual alias
+    if (sess?.name) return `officer:${sess.name}`;
+    if (alias) return `officer:${alias}`;
+    return 'officer';
+  }
+
+  return sess?.name ? `player:${sess.name}` : 'anonymous';
 }
+
+// Keep your existing readSession()/isOfficer() as-is.
+// If you want, tweak your header to show both when applicable:
+// officer + player name at the same time.
 
 // helper to set the officer cookie value in the login route
 export function signedOfficerCookieValue(): string {

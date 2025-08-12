@@ -10,6 +10,7 @@ type KillsPayload =
 
 export default function OfficerPage() {
   const [isOfficer, setIsOfficer] = useState<boolean | null>(null);
+  const [officerName, setOfficerName] = useState('');
   const [keyInput, setKeyInput] = useState('');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
@@ -205,6 +206,45 @@ export default function OfficerPage() {
         <h1 className="text-2xl font-semibold">Officer Panel</h1>
         <div className="badge">{weekLabel}</div>
       </div>
+          {/* Officer identity (used in audit actorDisplay) */}
+          <div className="panel max-w-xl">
+            <div className="panel-title">Officer identity</div>
+            <p className="badge mb-2">
+              Audits will show <code>officer:&lt;name&gt;</code>. If you’ve claimed a character, we use that.
+              Otherwise set an alias:
+            </p>
+            <div className="flex gap-2">
+              <input
+                className="w-56"
+                placeholder="e.g. Tayvok"
+                value={officerName}
+                onChange={(e) => setOfficerName(e.target.value)}
+              />
+              <button
+                className="btn"
+                disabled={!officerName.trim()}
+                onClick={async () => {
+                  await fetch('/api/officer/alias', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: officerName.trim() }),
+                  });
+                  // optional: feedback
+                }}
+              >
+                Save alias
+              </button>
+              <button
+                className="btn"
+                onClick={async () => {
+                  await fetch('/api/officer/alias', { method: 'DELETE' });
+                  setOfficerName('');
+                }}
+              >
+                Clear
+              </button>
+            </div>
+          </div>
 
       {/* SR Controls */}
       <div className="panel space-y-3">

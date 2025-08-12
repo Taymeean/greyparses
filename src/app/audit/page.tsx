@@ -1,220 +1,342 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
 
 type AuditItem = {
-  id: number; createdAt: string; actorDisplay: string | null;
-  action: string; targetType: string; targetId: string; weekId: number | null;
-  before: any; after: any;
+  id: number;
+  createdAt: string;
+  actorDisplay: string | null;
+  action: string;
+  targetType: string;
+  targetId: string | null;
+  weekId: number | null;
+  before: any | null;
+  after: any | null;
+  meta: any | null;
 };
-type ApiPage = { items: AuditItem[]; nextCursor: number | null };
-type Week = { id: number; label: string; startDate: string };
 
-function formatNY(ts: string) {
-  try {
-    return new Intl.DateTimeFormat('en-US', {
-      timeZone: 'America/New_York',
-      year: 'numeric', month: 'short', day: '2-digit',
-      hour: '2-digit', minute: '2-digit', second: '2-digit',
-    }).format(new Date(ts));
-  } catch { return ts; }
-}
+type AuditResponse = { items: AuditItem[]; nextCursor: number | null };
+type Boss = { id: number; name: string };
 
 export default function AuditPage() {
-  const router = useRouter();
-  const [rows, setRows] = useState<AuditItem[]>([]);
-  const [nextCursor, setNextCursor] = useState<number | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [actor, setActor] = useState('');
-  const [action, setAction] = useState('');
-  const [pageSize, setPageSize] = useState(20);
-  const [weeks, setWeeks] = useState<Week[]>([]);
-  const [weekId, setWeekId] = useState<number | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [needsOfficer, setNeedsOfficer] = useState(false); // 👈 NEW
+  const [isOfficer, setIsOfficer] = useState<boolean | null>(null);
 
-  // load weeks once
+  // current week
+  const [weekId, setWeekId] = useState<number | ''>('');
+  const [weekLabel, setWeekLabel] = useState<string>('—');
+
+  // filters
+  const [limit, setLimit] = useState<number>(50);
+  const [action, setAction] = useState<string>('');
+
+  // data
+  const [items, setItems] = useState<AuditItem[]>([]);
+  const [cursor, setCursor] = useState<number | null>(null);
+  const [nextCursor, setNextCursor] = useState<number | null>(null);
+
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  // label caches
+  const [bossMap, setBossMap] = useState<Record<number, string>>({});
+  const [lootMap, setLootMap] = useState<Record<number, string>>({});
+
+  // boot: officer probe + set current week from SR + load logs
   useEffect(() => {
-    fetch('/api/weeks?limit=24', { cache: 'no-store' })
-      .then(r => r.ok ? r.json() : Promise.reject(r.statusText))
-      .then((ws: Week[]) => {
-        setWeeks(ws);
-        if (ws.length && weekId === null) setWeekId(ws[0].id);
-      })
-      .catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    let alive = true;
+    (async () => {
+      try {
+        const probe = await fetch(`/api/audit?limit=1`, { cache: 'no-store' });
+        if (!alive) return;
+        if (probe.status === 403) { setIsOfficer(false); return; }
+        setIsOfficer(true);
+
+        // week label/id
+        const srRes = await fetch('/api/sr', { cache: 'no-store' });
+        if (srRes.ok) {
+          const sr = await srRes.json();
+          if (sr?.weekId) setWeekId(sr.weekId);
+          if (sr?.label) setWeekLabel(sr.label);
+        }
+
+        // bosses
+        const bRes = await fetch('/api/bosses', { cache: 'no-store' });
+        if (bRes.ok) {
+          const bosses: Boss[] = await bRes.json();
+          setBossMap(Object.fromEntries(bosses.map(b => [b.id, b.name])));
+        }
+
+        await loadLogs({ reset: true, forceCursor: null });
+      } catch {
+        setIsOfficer(false);
+      }
+    })();
+    return () => { alive = false; };
   }, []);
 
-  const baseUrl = useMemo(() => {
-    const params = new URLSearchParams();
-    params.set('limit', String(pageSize));
-    if (weekId != null) params.set('weekId', String(weekId));
-    if (actor.trim()) params.set('actor', actor.trim());
-    if (action.trim()) params.set('action', action.trim());
-    return `/api/audit?${params.toString()}`;
-  }, [pageSize, weekId, actor, action]);
+  // whenever items change, prefetch loot labels we don't know yet
+  useEffect(() => {
+    const need = collectLootIds(items).filter(id => lootMap[id] == null);
+    if (need.length === 0) return;
+    (async () => {
+      const res = await fetch(`/api/loot/labels?ids=${need.join(',')}`, { cache: 'no-store' });
+      if (!res.ok) return;
+      const map = await res.json();
+      setLootMap(prev => ({ ...prev, ...map }));
+    })();
+  }, [items]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function loadFirstPage() {
-    setLoading(true); setError(null); setNeedsOfficer(false);
+  async function loadLogs(opts?: { reset?: boolean; forceWeekId?: number | ''; forceCursor?: number | null }) {
+    const useWeek = opts?.forceWeekId !== undefined ? opts.forceWeekId : weekId;
+    const useCursor = opts?.reset ? null : (opts?.forceCursor ?? cursor);
+
+    setLoading(true);
+    setErr(null);
     try {
-      const res = await fetch(baseUrl, { cache: 'no-store' });
-      if (res.status === 403) { setNeedsOfficer(true); setRows([]); setNextCursor(null); return; }
+      const q = new URLSearchParams();
+      q.set('limit', String(limit));
+      if (useWeek !== '' && useWeek != null) q.set('weekId', String(useWeek));
+      if (action) q.set('action', action);
+      if (useCursor != null) q.set('cursor', String(useCursor));
+
+      const res = await fetch(`/api/audit?${q.toString()}`, { cache: 'no-store' });
+      if (res.status === 403) { setIsOfficer(false); setLoading(false); return; }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data: ApiPage = await res.json();
-      setRows(data.items);
-      setNextCursor(data.nextCursor);
+      const j: AuditResponse = await res.json();
+
+      setItems(j.items || []);
+      setNextCursor(j.nextCursor ?? null);
+      setCursor(useCursor ?? null);
     } catch (e: any) {
-      setError(e.message || 'Failed to load');
+      setErr(e.message || 'Failed to load audit logs');
     } finally {
       setLoading(false);
     }
   }
 
-  async function loadMore() {
-    if (!nextCursor) return;
-    setLoading(true); setError(null);
-    try {
-      const res = await fetch(`${baseUrl}&cursor=${nextCursor}`, { cache: 'no-store' });
-      if (res.status === 403) { setNeedsOfficer(true); return; }
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data: ApiPage = await res.json();
-      setRows(prev => [...prev, ...data.items]);
-      setNextCursor(data.nextCursor);
-    } catch (e: any) {
-      setError(e.message || 'Failed to load more');
-    } finally {
-      setLoading(false);
-    }
-  }
+  const title = useMemo(() => `Audit`, []);
+  const timeFmt = (ts: string) =>
+    new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/New_York',
+      year: 'numeric', month: 'short', day: '2-digit',
+      hour: '2-digit', minute: '2-digit',
+    }).format(new Date(ts));
 
-  useEffect(() => { loadFirstPage(); }, [baseUrl]);
-
-  if (needsOfficer) {
+  if (isOfficer === null) return <div className="badge">Checking access…</div>;
+  if (!isOfficer) {
     return (
-      <div className="p-6 max-w-xl mx-auto space-y-4">
-        <h1 className="text-2xl font-semibold">Audit (Officer only)</h1>
-        <div className="p-4 border rounded bg-amber-50">
-          <p className="text-sm text-amber-900">
-            You need officer access to view logs. Sign in below.
-          </p>
-          <button
-            onClick={() => router.push('/officer')}
-            className="mt-3 px-4 py-2 rounded bg-black text-white"
-          >
-            Go to Officer Login
-          </button>
-        </div>
+      <div className="panel max-w-xl">
+        <div className="panel-title text-lg">{title}</div>
+        <p className="badge mb-2">This page is officer-only.</p>
+        <a className="btn" href="/officer">Go to Officer Login</a>
       </div>
     );
   }
 
   return (
-    <div className="p-6 space-y-4">
+    <div className="space-y-6">
+      {/* Header */}
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Audit Viewer</h1>
-        <button
-          onClick={() => router.push('/officer')}
-          className="text-sm underline"
-        >
-          Officer login
-        </button>
+        <h1 className="text-2xl font-semibold">{title}</h1>
+        <div className="badge">{weekLabel}</div>
       </div>
 
-      <div className="flex flex-wrap gap-3 items-end">
-        <div className="flex flex-col">
-          <label className="text-sm text-gray-500">Week</label>
-          <select
-            className="border rounded px-3 py-1"
-            value={weekId ?? ''}
-            onChange={(e) => setWeekId(e.target.value ? Number(e.target.value) : null)}
-          >
-            {weeks.length === 0 && <option value="">(loading…)</option>}
-            {weeks.map(w => <option key={w.id} value={w.id}>{w.label}</option>)}
-            <option value="">All weeks</option>
-          </select>
-        </div>
+      {/* Filters */}
+      <div className="panel">
+        <div className="panel-title mb-2">Filters</div>
+        <div className="flex flex-wrap items-end gap-3">
+          <div>
+            <div className="badge mb-1">Week ID</div>
+            <input
+              className="w-28"
+              type="number"
+              placeholder="(current)"
+              value={weekId}
+              onChange={(e) => setWeekId(e.target.value === '' ? '' : Number(e.target.value))}
+            />
+          </div>
 
-        <div className="flex flex-col">
-          <label className="text-sm text-gray-500">Actor contains</label>
-          <input
-            className="border rounded px-3 py-1"
-            placeholder="player:Skullblaster / officer"
-            value={actor}
-            onChange={(e) => setActor(e.target.value)}
-          />
-        </div>
+          <div>
+            <div className="badge mb-1">Limit</div>
+            <select value={limit} onChange={(e) => setLimit(Number(e.target.value))}>
+              <option value={50}>50</option>
+              <option value={100}>100</option>
+              <option value={200}>200</option>
+            </select>
+          </div>
 
-        <div className="flex flex-col">
-          <label className="text-sm text-gray-500">Action (exact)</label>
-          <input
-            className="border rounded px-3 py-1"
-            placeholder="SR_CHOICE_SET"
-            value={action}
-            onChange={(e) => setAction(e.target.value)}
-          />
-        </div>
+          <div>
+            <div className="badge mb-1">Action</div>
+            <select value={action} onChange={(e) => setAction(e.target.value)}>
+              <option value="">Any</option>
+              <option value="SR_CHOICE_SET">SR_CHOICE_SET</option>
+              <option value="SR_LOCKED">SR_LOCKED</option>
+              <option value="SR_UNLOCKED_EXCEPT_KILLED">SR_UNLOCKED_EXCEPT_KILLED</option>
+              <option value="BOSS_KILL_TOGGLED">BOSS_KILL_TOGGLED</option>
+              <option value="WEEK_RESET">WEEK_RESET</option>
+            </select>
+          </div>
 
-        <div className="flex flex-col">
-          <label className="text-sm text-gray-500">Page size</label>
-          <select
-            className="border rounded px-3 py-1"
-            value={pageSize}
-            onChange={(e) => setPageSize(Number(e.target.value))}
-          >
-            {[10, 20, 50, 100].map(n => <option key={n} value={n}>{n}</option>)}
-          </select>
-        </div>
+          <div className="flex gap-2">
+            <button className="btn" onClick={() => loadLogs({ reset: true })} disabled={loading}>
+              {loading ? 'Loading…' : 'Apply'}
+            </button>
+            <button
+              className="btn"
+              onClick={() => { setCursor(null); loadLogs({ reset: true }); }}
+              disabled={loading}
+              title="Reload from newest"
+            >
+              Reset cursor
+            </button>
+          </div>
 
-        <button
-          onClick={loadFirstPage}
-          disabled={loading}
-          className="px-3 py-2 rounded bg-black text-white disabled:opacity-50"
-        >
-          {loading ? 'Loading…' : 'Apply'}
-        </button>
+          {err && <div className="text-sm text-red-400">{err}</div>}
+        </div>
       </div>
 
-      {error && <div className="text-red-600">Error: {error}</div>}
-
-      <div className="border rounded overflow-x-auto">
-        <table className="min-w-full text-sm">
-          <thead className="bg-gray-50">
-            <tr className="text-left">
-              <th className="px-3 py-2">Time (NY)</th>
-              <th className="px-3 py-2">Actor</th>
-              <th className="px-3 py-2">Action</th>
-              <th className="px-3 py-2">Target</th>
-              <th className="px-3 py-2">Week</th>
+      {/* Table */}
+      <div className="sr-wrap">
+        <table className="min-w-full text-[15px]">
+          <thead>
+            <tr>
+              <th>Time (ET)</th>
+              <th>Actor</th>
+              <th>Action</th>
+              <th>Target</th>
+              <th>Changes</th>
             </tr>
           </thead>
           <tbody>
-            {rows.map(r => (
-              <tr key={r.id} className="border-t">
-                <td className="px-3 py-2 whitespace-nowrap">{formatNY(r.createdAt)}</td>
-                <td className="px-3 py-2">{r.actorDisplay ?? '—'}</td>
-                <td className="px-3 py-2">{r.action}</td>
-                <td className="px-3 py-2">{r.targetType}: {r.targetId}</td>
-                <td className="px-3 py-2">{r.weekId ?? '—'}</td>
+            {items.map((it) => (
+              <tr key={it.id}>
+                <td className="whitespace-nowrap">{timeFmt(it.createdAt)}</td>
+                <td className="whitespace-nowrap">{it.actorDisplay ?? '—'}</td>
+                <td className="whitespace-nowrap">{it.action}</td>
+                <td className="whitespace-nowrap">{it.targetId ?? '—'}</td>
+                <td>
+                  <ChangeList
+                    item={it}
+                    bossMap={bossMap}
+                    lootMap={lootMap}
+                  />
+                </td>
               </tr>
             ))}
-            {rows.length === 0 && !loading && (
-              <tr><td colSpan={5} className="px-3 py-8 text-center text-gray-500">No results</td></tr>
+            {items.length === 0 && (
+              <tr>
+                <td colSpan={5} className="text-center text-neutral-400 py-8">No logs</td>
+              </tr>
             )}
           </tbody>
         </table>
       </div>
 
-      <div className="flex items-center gap-3">
-        <button
-          onClick={loadMore}
-          disabled={loading || !nextCursor}
-          className="px-3 py-2 rounded border"
-        >
-          {nextCursor ? (loading ? 'Loading…' : 'Load older') : 'No more'}
-        </button>
-        <span className="text-xs text-gray-500">Showing {rows.length} logs</span>
+      {/* Pager */}
+      <div className="flex items-center justify-between">
+        <div className="badge">{items.length} rows</div>
+        <div className="flex gap-2">
+          <button
+            className="btn"
+            onClick={() => loadLogs({ reset: true, forceCursor: null })}
+            disabled={loading}
+          >
+            Newest
+          </button>
+          <button
+            className="btn"
+            onClick={() => { if (nextCursor != null) loadLogs({ forceCursor: nextCursor }); }}
+            disabled={loading || nextCursor == null}
+          >
+            Older →
+          </button>
+        </div>
       </div>
     </div>
+  );
+}
+
+/* ---------- Helpers ---------- */
+
+function collectLootIds(items: AuditItem[]): number[] {
+  const out = new Set<number>();
+  for (const it of items) {
+    [it.before, it.after].forEach(obj => {
+      if (obj && typeof obj === 'object' && 'lootItemId' in obj) {
+        const v = (obj as any).lootItemId;
+        if (typeof v === 'number' && Number.isFinite(v)) out.add(v);
+      }
+    });
+  }
+  return [...out];
+}
+
+function prettyValue(key: string, val: any, maps: { bossMap: Record<number, string>, lootMap: Record<number, string> }) {
+  if (val == null) return '—';
+  if (key === 'bossId') {
+    const id = Number(val);
+    return maps.bossMap[id] ? `${maps.bossMap[id]} (#${id})` : `Boss #${id}`;
+  }
+  if (key === 'lootItemId') {
+    const id = Number(val);
+    return maps.lootMap[id] ? `${maps.lootMap[id]} (#${id})` : `Item #${id}`;
+  }
+  if (key === 'isTier') return val ? 'Y' : 'N';
+  if (key === 'locked') return val ? 'Locked' : 'Unlocked';
+  if (Array.isArray(val)) return val.length ? `[${val.join(', ')}]` : '[]';
+  if (typeof val === 'object') return JSON.stringify(val);
+  return String(val);
+}
+
+function labelForKey(action: string, key: string) {
+  // Friendly labels per action/key
+  const map: Record<string, string> = {
+    lootItemId: 'Item',
+    bossId: 'Boss',
+    notes: 'Notes',
+    isTier: 'Tier',
+    locked: 'Locked',
+    unlocked: 'Unlocked',
+    killed: 'Killed',
+    killedBossIds: 'Killed Bosses',
+    affected: 'Affected',
+  };
+  return map[key] || key;
+}
+
+function diffPairs(before: any, after: any, action: string, maps: { bossMap: Record<number, string>, lootMap: Record<number, string> }) {
+  const keys = new Set<string>([
+    ...Object.keys(before || {}),
+    ...Object.keys(after || {}),
+  ]);
+  const rows: { label: string; before?: string; after?: string }[] = [];
+  keys.forEach((k) => {
+    const b = before?.[k];
+    const a = after?.[k];
+    const same = JSON.stringify(b) === JSON.stringify(a);
+    if (same) return;
+    rows.push({
+      label: labelForKey(action, k),
+      before: b === undefined ? undefined : prettyValue(k, b, maps),
+      after: a === undefined ? undefined : prettyValue(k, a, maps),
+    });
+  });
+  return rows;
+}
+
+function ChangeList({ item, bossMap, lootMap }: { item: AuditItem; bossMap: Record<number, string>; lootMap: Record<number, string> }) {
+  // Prefer meta.display if you later add it to logs; fallback to diff
+  const rows = diffPairs(item.before, item.after, item.action, { bossMap, lootMap });
+  if (!rows.length) return <span className="badge">—</span>;
+  return (
+    <ul className="space-y-1">
+      {rows.map((r, i) => (
+        <li key={i}>
+          <span className="text-neutral-300">{r.label}:</span>{' '}
+          {r.before !== undefined ? <>{r.before} <span className="text-neutral-500">→</span> </> : null}
+          <b>{r.after ?? '—'}</b>
+        </li>
+      ))}
+    </ul>
   );
 }
