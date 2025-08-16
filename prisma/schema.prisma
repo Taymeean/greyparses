@@ -185,15 +185,20 @@ model SRLog {
   weekId     Int
   playerId   Int
   lootItemId Int
+  isTier     Boolean  @default(false)
+  notes      String?  // enforce 128 in app (SQLite doesn’t honor varchar length)
   createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
   week     Week     @relation(fields: [weekId], references: [id])
   player   Player   @relation(fields: [playerId], references: [id])
   lootItem LootItem @relation(fields: [lootItemId], references: [id])
 
+  @@unique([weekId, playerId]) // one SR per player per week
   @@index([weekId])
   @@index([playerId])
   @@index([lootItemId])
+  @@index([createdAt])
 }
 
 model AuditLog {
