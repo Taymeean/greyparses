@@ -1,6 +1,6 @@
-import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/db';
-import { getCurrentWeekStartNY, formatWeekLabelNY } from '@/lib/week';
+import { NextResponse } from "next/server";
+import { prisma } from "@/lib/db";
+import { getCurrentWeekStartNY, formatWeekLabelNY } from "@/lib/week";
 
 export async function GET() {
   // find current week by NY label
@@ -19,7 +19,7 @@ export async function GET() {
 
   const bosses = await prisma.boss.findMany({
     where: { raidId: week.raidId },
-    orderBy: { id: 'asc' },
+    orderBy: { id: "asc" },
     select: { id: true, name: true },
   });
 
@@ -27,13 +27,17 @@ export async function GET() {
     where: { weekId: week.id },
     select: { bossId: true, killed: true },
   });
-  const killedMap = new Map(kills.map(k => [k.bossId, k.killed]));
+  const killedMap = new Map(kills.map((k) => [k.bossId, k.killed]));
 
-  const rows = bosses.map(b => ({
+  const rows = bosses.map((b) => ({
     id: b.id,
     name: b.name,
     killed: Boolean(killedMap.get(b.id)),
   }));
 
-  return NextResponse.json({ weekId: week.id, label: week.label, bosses: rows });
+  return NextResponse.json({
+    weekId: week.id,
+    label: week.label,
+    bosses: rows,
+  });
 }

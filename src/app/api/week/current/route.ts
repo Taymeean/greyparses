@@ -1,7 +1,7 @@
 // src/app/api/week/current/route.ts
-import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/db';
-import { getCurrentWeekStartNY, formatWeekLabelNY } from '@/lib/week';
+import { NextResponse } from "next/server";
+import { prisma } from "@/lib/db";
+import { getCurrentWeekStartNY, formatWeekLabelNY } from "@/lib/week";
 
 export async function GET() {
   const start = getCurrentWeekStartNY();

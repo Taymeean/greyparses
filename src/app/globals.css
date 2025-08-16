@@ -4,20 +4,21 @@
 @tailwind utilities;
 
 /* === Grey Parses palette === */
-:root{
-  --bg-1: #0d0f12;     /* page background */
-  --bg-2: #11141a;     /* header / panels */
-  --surface-1: #13171e;/* table rows (odd) */
-  --surface-2: #161b23;/* table rows (even) */
+:root {
+  --bg-1: #0d0f12; /* page background */
+  --bg-2: #11141a; /* header / panels */
+  --surface-1: #13171e; /* table rows (odd) */
+  --surface-2: #161b23; /* table rows (even) */
   --border-1: #2a2f39;
   --hover-1: #1b212b;
   --text-1: #e7e9ee;
   --text-2: #b7bfcc;
-  --accent: #a5b4fc;   /* indigo-300-ish */
+  --accent: #a5b4fc; /* indigo-300-ish */
 }
 
 /* page baseline */
-html, body {
+html,
+body {
   background-color: var(--bg-1);
   color: var(--text-1);
   -webkit-font-smoothing: antialiased;
@@ -25,28 +26,79 @@ html, body {
 }
 
 /* header + nav */
-header { background: color-mix(in oklab, var(--bg-2) 92%, transparent); }
-header nav { display:flex; gap:1.5rem; }
-header nav a { color: var(--accent); text-decoration:none; }
-header nav a:hover { color:#fff; text-decoration:underline; }
-header nav a:visited { color: var(--accent); }
+header {
+  background: color-mix(in oklab, var(--bg-2) 92%, transparent);
+}
+header nav {
+  display: flex;
+  gap: 1.5rem;
+}
+header nav a {
+  color: var(--accent);
+  text-decoration: none;
+}
+header nav a:hover {
+  color: #fff;
+  text-decoration: underline;
+}
+header nav a:visited {
+  color: var(--accent);
+}
 
 /* dark form controls (softer than white) */
+input:not([type]),
 input[type="text"],
 input[type="search"],
 input[type="email"],
 input[type="password"],
+input[type="number"],
+input[type="url"],
+input[type="tel"],
 select,
 textarea {
-  background: var(--surface-2);
+  background-color: var(--surface-2);
   color: var(--text-1);
   border: 1px solid var(--border-1);
   border-radius: 0.375rem;
   padding: 0.375rem 0.5rem;
   line-height: 1.25rem;
 }
-input::placeholder, textarea::placeholder { color: var(--text-2); }
-input:disabled, select:disabled, textarea:disabled { opacity: 0.6; }
+
+/* focus state so it doesn’t look broken */
+input:not([type]):focus,
+input[type="text"]:focus,
+input[type="search"]:focus,
+input[type="email"]:focus,
+input[type="password"]:focus,
+input[type="number"]:focus,
+input[type="url"]:focus,
+input[type="tel"]:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: color-mix(
+    in oklab,
+    var(--indigo-5, #818cf8) 60%,
+    var(--border-1) 40%
+  );
+  box-shadow: 0 0 0 2px color-mix(in oklab, #818cf8 20%, transparent);
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--text-2);
+}
+
+input:disabled,
+select:disabled,
+textarea:disabled {
+  opacity: 0.6;
+}
+
+/* optional: make selects less 2003 */
+select {
+  appearance: none;
+}
 
 /* SR table wrapper */
 .sr-wrap {
@@ -74,10 +126,20 @@ input:disabled, select:disabled, textarea:disabled { opacity: 0.6; }
   border-top: 1px solid var(--border-1);
   text-align: left;
 }
-.sr-wrap th { color: var(--text-1); font-weight: 600; }
-.sr-wrap tbody tr:nth-child(odd)  { background: var(--surface-1); }
-.sr-wrap tbody tr:nth-child(even) { background: var(--surface-2); }
-.sr-wrap tbody tr:hover { background: var(--hover-1); transition: background-color .15s; }
+.sr-wrap th {
+  color: var(--text-1);
+  font-weight: 600;
+}
+.sr-wrap tbody tr:nth-child(odd) {
+  background: var(--surface-1);
+}
+.sr-wrap tbody tr:nth-child(even) {
+  background: var(--surface-2);
+}
+.sr-wrap tbody tr:hover {
+  background: var(--hover-1);
+  transition: background-color 0.15s;
+}
 
 /* --- Grey Parses UI helpers --- */
 .panel {
@@ -90,35 +152,141 @@ input:disabled, select:disabled, textarea:disabled { opacity: 0.6; }
   font-weight: 600;
   color: var(--text-1);
 }
+.panel-center {
+  max-width: 36rem; /* ~ Tailwind max-w-xl */
+  margin-left: auto !important;
+  margin-right: auto !important;
+}
+/* panel that fills the page container width */
+.panel-wide {
+  max-width: 100%;
+  width: 100%;
+}
+/* Tables inside panels look like they belong there */
+.panel table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.panel table th,
+.panel table td {
+  padding: 0.5rem 0.75rem; /* match SR table rhythm */
+  vertical-align: middle;
+}
+
+.panel table th {
+  text-align: left; /* ← the real fix */
+  font-weight: 600;
+  color: var(--text-2);
+}
+
+.panel table tbody tr + tr td {
+  border-top: 1px solid var(--border-1); /* row separators */
+}
+
+/* Header nav: immune to whatever global anchor rules you’ve got */
+.topnav {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+}
+.topnav .navlink {
+  color: #a5b4fc !important; /* indigo-300 */
+  text-decoration: none !important;
+}
+.topnav .navlink:hover {
+  color: #ffffff !important;
+  text-decoration: underline !important;
+  text-underline-offset: 4px;
+}
+/* Header bar: three zones (brand | nav | status) */
+.headerbar {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  height: 56px; /* matches h-14 */
+}
+.headerbar .brand {
+  justify-self: start;
+}
+.headerbar .topnav {
+  justify-self: center;
+} /* center the links row */
+.headerbar .right {
+  justify-self: end;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem; /* ~gap-3 */
+}
+/* Brand link: force sane color */
+.navbrand,
+.navbrand:visited {
+  color: #fff !important;
+  text-decoration: none !important;
+}
+.navbrand:hover {
+  opacity: 0.9;
+}
 
 .btn {
-  display: inline-flex; align-items: center; justify-content: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border: 1px solid var(--border-1);
   background: var(--surface-2);
   color: var(--text-1);
-  padding: .5rem .75rem;
-  border-radius: .5rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.5rem;
   cursor: pointer;
-  transition: background-color .15s ease, border-color .15s ease, opacity .15s ease;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    opacity 0.15s ease;
 }
-.btn:hover { background: var(--hover-1); }
-.btn:disabled { opacity: .5; cursor: not-allowed; }
-.btn-primary { background: #4f46e5; border-color: #4338ca; color: #fff; }
-.btn-primary:hover { background: #6366f1; }
-.btn-danger { background: #b91c1c; border-color: #991b1b; color: #fff; }
-.btn-danger:hover { background: #dc2626; }
+.btn:hover {
+  background: var(--hover-1);
+}
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.btn-primary {
+  background: #4f46e5;
+  border-color: #4338ca;
+  color: #fff;
+}
+.btn-primary:hover {
+  background: #6366f1;
+}
+.btn-danger {
+  background: #b91c1c;
+  border-color: #991b1b;
+  color: #fff;
+}
+.btn-danger:hover {
+  background: #dc2626;
+}
 
 .badge {
-  font-size: 12px; color: var(--text-2);
+  font-size: 12px;
+  color: var(--text-2);
 }
 
 .checkbox-row {
-  display: flex; align-items: center; gap: .75rem;
-  padding: .5rem .75rem;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
   background: var(--surface-1);
   border: 1px solid var(--border-1);
-  border-radius: .5rem;
-  transition: background-color .15s ease;
+  border-radius: 0.5rem;
+  transition: background-color 0.15s ease;
 }
-.checkbox-row:hover { background: var(--hover-1); }
-.btn-lg { padding: .625rem 1rem; font-size: 1rem; }
+.checkbox-row:hover {
+  background: var(--hover-1);
+}
+.btn-lg {
+  padding: 0.625rem 1rem;
+  font-size: 1rem;
+}

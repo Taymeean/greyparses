@@ -6,7 +6,15 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "nuke:logs": "node scripts/nuke.cjs logs",
+    "nuke:week": "node scripts/nuke.cjs week",
+    "nuke:all": "node scripts/nuke.cjs all",
+    "nuke:players": "node scripts/nuke-players.cjs all",
+    "nuke:players:inactive": "node scripts/nuke-players.cjs inactive",
+    "nuke:players:audit": "node scripts/nuke-players.cjs all --purge-audit"
   },
   "dependencies": {
     "@prisma/client": "^6.13.0",
@@ -28,6 +36,7 @@
     "eslint": "^9",
     "eslint-config-next": "15.4.6",
     "postcss": "^8.5.6",
+    "prettier": "^3.6.2",
     "prisma": "^6.14.0",
     "tailwindcss": "^4.1.11",
     "ts-node": "^10.9.2",

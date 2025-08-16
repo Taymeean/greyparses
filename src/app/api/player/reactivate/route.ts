@@ -1,27 +1,35 @@
-import { NextResponse } from 'next/server';
-import { z } from 'zod';
-import { prisma } from '@/lib/db';
-import { isOfficer, getActorDisplay } from '@/lib/auth';
-import { AuditAction } from '@prisma/client';
+import { NextResponse } from "next/server";
+import { z } from "zod";
+import { prisma } from "@/lib/db";
+import { isOfficer, getActorDisplay } from "@/lib/auth";
+import { AuditAction } from "@prisma/client";
 
-const Body = z.object({
-  playerId: z.number().int().positive().optional(),
-  name: z.string().min(2).max(24).optional(),
-}).refine(d => d.playerId || d.name, { message: 'Provide playerId or name' });
+const Body = z
+  .object({
+    playerId: z.number().int().positive().optional(),
+    name: z.string().min(2).max(24).optional(),
+  })
+  .refine((d) => d.playerId || d.name, { message: "Provide playerId or name" });
 
 export async function POST(req: Request) {
-  if (!isOfficer()) return NextResponse.json({ error: 'Officer only' }, { status: 403 });
+  if (!isOfficer())
+    return NextResponse.json({ error: "Officer only" }, { status: 403 });
 
   const json = await req.json().catch(() => null);
   const parsed = Body.safeParse(json);
-  if (!parsed.success) return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
+  if (!parsed.success)
+    return NextResponse.json(
+      { error: parsed.error.flatten() },
+      { status: 400 },
+    );
   const { playerId, name } = parsed.data;
 
   const player = await prisma.player.findFirst({
     where: playerId ? { id: playerId } : { name: name! },
     select: { id: true, active: true },
   });
-  if (!player) return NextResponse.json({ error: 'Player not found' }, { status: 404 });
+  if (!player)
+    return NextResponse.json({ error: "Player not found" }, { status: 404 });
 
   if (player.active) return NextResponse.json({ ok: true, reactivated: false });
 
@@ -34,7 +42,7 @@ export async function POST(req: Request) {
   await prisma.auditLog.create({
     data: {
       action: AuditAction.PLAYER_REACTIVATED,
-      targetType: 'PLAYER',
+      targetType: "PLAYER",
       targetId: `player:${updated.id}`,
       weekId: null,
       before: { active: false },

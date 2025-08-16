@@ -1,14 +1,18 @@
 // src/app/api/reset-week/route.ts
-import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/db';
-import { getCurrentWeekStartNY, formatWeekLabelNY, getNextWeekStartFrom } from '@/lib/week';
-import { AuditAction } from '@prisma/client';
-import { getActorDisplay, isOfficer } from '@/lib/auth';
+import { NextResponse } from "next/server";
+import { prisma } from "@/lib/db";
+import {
+  getCurrentWeekStartNY,
+  formatWeekLabelNY,
+  getNextWeekStartFrom,
+} from "@/lib/week";
+import { AuditAction } from "@prisma/client";
+import { getActorDisplay, isOfficer } from "@/lib/auth";
 
 export async function POST() {
   // officer gate
   if (!isOfficer()) {
-    return NextResponse.json({ error: 'Officer only' }, { status: 403 });
+    return NextResponse.json({ error: "Officer only" }, { status: 403 });
   }
 
   // resolve current (closing) week by label
@@ -19,7 +23,10 @@ export async function POST() {
     select: { id: true, raidId: true, startDate: true, label: true },
   });
   if (!current) {
-    return NextResponse.json({ error: 'Current week not found. Seed/init first.' }, { status: 500 });
+    return NextResponse.json(
+      { error: "Current week not found. Seed/init first." },
+      { status: 500 },
+    );
   }
 
   // snapshot counts for audit
@@ -46,7 +53,7 @@ export async function POST() {
   await prisma.auditLog.create({
     data: {
       action: AuditAction.WEEK_RESET,
-      targetType: 'WEEK',
+      targetType: "WEEK",
       targetId: `week:${current.id}`,
       weekId: current.id,
       before: { label: current.label, choicesCount, killsTrueCount },

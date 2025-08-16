@@ -1,23 +1,24 @@
-import { NextResponse } from 'next/server';
-import { prisma } from '@/lib/db';
-import { getCurrentWeekStartNY, formatWeekLabelNY } from '@/lib/week';
+import { NextResponse } from "next/server";
+import { prisma } from "@/lib/db";
+import { getCurrentWeekStartNY, formatWeekLabelNY } from "@/lib/week";
 
 export async function GET(req: Request) {
   const url = new URL(req.url);
-  const weekIdParam = url.searchParams.get('weekId');
+  const weekIdParam = url.searchParams.get("weekId");
 
   let week: { id: number; label: string } | null = null;
 
   if (weekIdParam) {
     const weekId = Number(weekIdParam);
     if (!Number.isInteger(weekId)) {
-      return NextResponse.json({ error: 'Invalid weekId' }, { status: 400 });
+      return NextResponse.json({ error: "Invalid weekId" }, { status: 400 });
     }
     const w = await prisma.week.findUnique({
       where: { id: weekId },
       select: { id: true, label: true },
     });
-    if (!w) return NextResponse.json({ error: 'Week not found' }, { status: 404 });
+    if (!w)
+      return NextResponse.json({ error: "Week not found" }, { status: 404 });
     week = w;
   } else {
     const start = getCurrentWeekStartNY();
@@ -26,24 +27,32 @@ export async function GET(req: Request) {
       where: { label },
       select: { id: true, label: true },
     });
-    if (!w) return NextResponse.json({ error: 'Current week not found' }, { status: 500 });
+    if (!w)
+      return NextResponse.json(
+        { error: "Current week not found" },
+        { status: 500 },
+      );
     week = w;
   }
 
   const players = await prisma.player.findMany({
-    orderBy: { name: 'asc' },
+    orderBy: { name: "asc" },
     select: {
       id: true,
       name: true,
       role: true,
       active: true, // 👈 include active
-      class: { select: { id: true, name: true, armorType: true, tierPrefix: true } },
+      class: {
+        select: { id: true, name: true, armorType: true, tierPrefix: true },
+      },
       srChoices: {
         where: { weekId: week.id },
         take: 1,
         select: {
           id: true,
-          lootItem: { select: { id: true, name: true, type: true, slot: true } },
+          lootItem: {
+            select: { id: true, name: true, type: true, slot: true },
+          },
           boss: { select: { id: true, name: true } },
           isTier: true,
           locked: true,
@@ -54,7 +63,7 @@ export async function GET(req: Request) {
     },
   });
 
-  const rows = players.map(p => {
+  const rows = players.map((p) => {
     const choice = p.srChoices[0] ?? null;
     return {
       playerId: p.id,
@@ -68,7 +77,7 @@ export async function GET(req: Request) {
         boss: choice.boss,
         isTier: choice.isTier,
         locked: choice.locked,
-        notes: choice.notes ?? '',
+        notes: choice.notes ?? "",
         updatedAt: choice.updatedAt,
       },
     };

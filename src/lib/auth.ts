@@ -1,18 +1,18 @@
-import { cookies } from 'next/headers';
-import crypto from 'node:crypto';
-import type { Role } from '@prisma/client';
+import { cookies } from "next/headers";
+import crypto from "node:crypto";
+import type { Role } from "@prisma/client";
 
-export const COOKIE_NAME = 'gp_sess';      // member session
-export const OFFICER_COOKIE = 'gp_officer'; // officer flag cookie
+export const COOKIE_NAME = "gp_sess"; // member session
+export const OFFICER_COOKIE = "gp_officer"; // officer flag cookie
 
-const SECRET = process.env.SESSION_SECRET ?? 'dev-secret';
+const SECRET = process.env.SESSION_SECRET ?? "dev-secret";
 
 // ===== utilities =====
 function b64u(buf: Buffer) {
-  return buf.toString('base64url');
+  return buf.toString("base64url");
 }
 function signData(data: string) {
-  return crypto.createHmac('sha256', SECRET).update(data).digest('base64url');
+  return crypto.createHmac("sha256", SECRET).update(data).digest("base64url");
 }
 
 // ===== member session (player) =====
@@ -25,17 +25,20 @@ export function signSession(p: SessionPayload): string {
 }
 
 export function verifySession(token: string): SessionPayload | null {
-  const parts = token.split('.');
-  if (parts.length !== 3 || parts[0] !== 'v1') return null;
+  const parts = token.split(".");
+  if (parts.length !== 3 || parts[0] !== "v1") return null;
   const [v, data, sig] = parts;
   const expected = signData(`${v}.${data}`);
   try {
-    if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return null;
+    if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected)))
+      return null;
   } catch {
     return null;
   }
   try {
-    return JSON.parse(Buffer.from(data, 'base64url').toString('utf8')) as SessionPayload;
+    return JSON.parse(
+      Buffer.from(data, "base64url").toString("utf8"),
+    ) as SessionPayload;
   } catch {
     return null;
   }
@@ -46,10 +49,7 @@ export function readSession() {
   const c = cookies();
 
   // Prefer our new cookie; accept old name for compatibility
-  const raw =
-    c.get('gp_member')?.value ??
-    c.get('member')?.value ??
-    null;
+  const raw = c.get("gp_member")?.value ?? c.get("member")?.value ?? null;
 
   if (!raw) return null;
 
@@ -69,16 +69,13 @@ export function readSession() {
 // opaque, signed value; no identity, just "officer ok"
 function officerMarker(): string {
   // stable HMAC so we can verify without DB
-  return signData('officer:marker:v1');
+  return signData("officer:marker:v1");
 }
 
 // --- PATCH: recognize either officer cookie name ---
 export function isOfficer() {
   const c = cookies();
-  return (
-    c.get('gp_officer')?.value === '1' ||
-    c.get('officer')?.value === '1'
-  );
+  return c.get("gp_officer")?.value === "1" || c.get("officer")?.value === "1";
 }
 
 // Use player session if present, even for officers.
@@ -87,29 +84,32 @@ export function getActorDisplay() {
   const c = cookies();
 
   // read player session (new + old cookie names)
-  const raw =
-    c.get('gp_member')?.value ??
-    c.get('member')?.value ??
-    null;
+  const raw = c.get("gp_member")?.value ?? c.get("member")?.value ?? null;
 
   let sess: { playerId?: number; name?: string } | null = null;
   if (raw) {
-    try { sess = JSON.parse(raw); }
-    catch { try { sess = JSON.parse(decodeURIComponent(raw)); } catch { /* ignore */ } }
+    try {
+      sess = JSON.parse(raw);
+    } catch {
+      try {
+        sess = JSON.parse(decodeURIComponent(raw));
+      } catch {
+        /* ignore */
+      }
+    }
   }
 
   const isOfficer =
-    c.get('gp_officer')?.value === '1' ||
-    c.get('officer')?.value === '1';
+    c.get("gp_officer")?.value === "1" || c.get("officer")?.value === "1";
 
   if (isOfficer) {
-    const alias = c.get('gp_officer_name')?.value; // optional manual alias
+    const alias = c.get("gp_officer_name")?.value; // optional manual alias
     if (sess?.name) return `officer:${sess.name}`;
     if (alias) return `officer:${alias}`;
-    return 'officer';
+    return "officer";
   }
 
-  return sess?.name ? `player:${sess.name}` : 'anonymous';
+  return sess?.name ? `player:${sess.name}` : "anonymous";
 }
 
 // Keep your existing readSession()/isOfficer() as-is.
