@@ -26,11 +26,13 @@ export async function POST(req: Request) {
     where: { id: playerId },
     select: { id: true, name: true, active: true },
   });
-  if (!prev) return NextResponse.json({ error: "not_found" }, { status: 404 });
+  if (!prev) {
+    return NextResponse.json({ error: "not_found" }, { status: 404 });
+  }
   if (prev.active === active) {
     return NextResponse.json({
       ok: true,
-      player: { id: prev.id, active: prev.active },
+      player: { id: prev.id, active: prev.active, name: prev.name },
     });
   }
 
@@ -40,28 +42,32 @@ export async function POST(req: Request) {
     select: { id: true, name: true, active: true },
   });
 
-  // Optional audit if your enums support it. If not, we skip.
-  try {
-    const actionKey = active ? "PLAYER_REACTIVATED" : "PLAYER_DEACTIVATED";
-    const targetKey = "PLAYER";
-    const action = (AuditAction as any)[actionKey];
-    const targetType = (TargetType as any)[targetKey];
+  // Optional audit: only if your enums include these members
+  const actionKey = active ? "PLAYER_REACTIVATED" : "PLAYER_DEACTIVATED";
+  const targetKey = "PLAYER";
 
-    if (action && targetType) {
-      await prisma.auditLog.create({
-        data: {
-          action,
-          targetType,
-          targetId: `player:${playerId}`,
-          before: { active: prev.active },
-          after: { active: updated.active },
-          actorDisplay: getActorDisplay(),
-          meta: { playerName: updated.name },
-        },
-      });
-    }
-  } catch {
-    // no meltdown if enum doesn't have those members
+  let action: AuditAction | undefined;
+  let targetType: TargetType | undefined;
+
+  if (actionKey in AuditAction) {
+    action = AuditAction[actionKey as keyof typeof AuditAction];
+  }
+  if (targetKey in TargetType) {
+    targetType = TargetType[targetKey as keyof typeof TargetType];
+  }
+
+  if (action && targetType) {
+    await prisma.auditLog.create({
+      data: {
+        action,
+        targetType,
+        targetId: `player:${playerId}`,
+        before: { active: prev.active },
+        after: { active: updated.active },
+        actorDisplay: getActorDisplay(),
+        meta: { playerName: updated.name },
+      },
+    });
   }
 
   return NextResponse.json({ ok: true, player: updated });

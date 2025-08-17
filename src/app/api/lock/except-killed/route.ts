@@ -2,7 +2,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getCurrentWeekStartNY, formatWeekLabelNY } from "@/lib/week";
-import { AuditAction } from "@prisma/client";
+import { Prisma, AuditAction } from "@prisma/client";
 import { getActorDisplay, isOfficer } from "@/lib/auth";
 
 export async function POST() {
@@ -15,11 +15,12 @@ export async function POST() {
   const start = getCurrentWeekStartNY();
   const label = formatWeekLabelNY(start);
   const week = await prisma.week.findUnique({ where: { label } });
-  if (!week)
+  if (!week) {
     return NextResponse.json(
       { error: "Current week not found" },
       { status: 500 },
     );
+  }
 
   // killed bosses this week
   const killed = await prisma.bossKill.findMany({
@@ -53,7 +54,8 @@ export async function POST() {
       targetType: "WEEK",
       targetId: `week:${week.id}`,
       weekId: week.id,
-      before: null,
+      // IMPORTANT: use Prisma.DbNull instead of raw null for JSON column
+      before: Prisma.DbNull,
       after: { unlocked: affected, killedBossIds: killedIds },
       actorDisplay: getActorDisplay(),
       meta: { unlocked: affected, killedBossIds: killedIds },

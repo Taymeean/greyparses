@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { getCurrentWeekStartNY, formatWeekLabelNY } from "@/lib/week";
-import { AuditAction } from "@prisma/client";
+import { Prisma, AuditAction } from "@prisma/client";
 import { getActorDisplay, isOfficer } from "@/lib/auth";
 
 const BodySchema = z.object({
@@ -70,9 +70,12 @@ export async function POST(req: Request) {
         targetType: "BOSS_KILL",
         targetId: `week:${week.id}/boss:${bossId}`,
         weekId: week.id,
-        before: existing ? { killed: existing.killed } : null,
+        before: existing ? { killed: existing.killed } : Prisma.DbNull,
         after: { killed },
         actorDisplay: getActorDisplay(),
+        // If you want actor playerId here, reintroduce readSession() later.
+        // For now, avoid the undefined variable `s`.
+        // meta: { actorPlayerId: readSession()?.playerId ?? null },
       },
     });
 

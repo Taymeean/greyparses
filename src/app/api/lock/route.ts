@@ -1,7 +1,8 @@
+// src/app/api/lock/route.ts
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getCurrentWeekStartNY, formatWeekLabelNY } from "@/lib/week";
-import { AuditAction } from "@prisma/client";
+import { Prisma, AuditAction } from "@prisma/client";
 import { getActorDisplay, isOfficer } from "@/lib/auth";
 
 export async function POST(req: Request) {
@@ -38,7 +39,8 @@ export async function POST(req: Request) {
       targetType: "WEEK",
       targetId: `week:${week.id}`,
       weekId: week.id,
-      before: null,
+      // JSON columns: use Prisma.DbNull instead of raw null
+      before: Prisma.DbNull,
       after: { locked: lock, affected: count },
       actorDisplay: getActorDisplay(),
       meta: { affected: count },

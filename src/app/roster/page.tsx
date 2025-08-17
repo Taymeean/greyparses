@@ -1,3 +1,4 @@
+// src/app/roster/page.tsx
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -16,6 +17,7 @@ type PlayerRow = {
   } | null;
 };
 
+type StatusFilter = "" | "active" | "inactive";
 const ROLES: PlayerRow["role"][] = ["TANK", "HEALER", "MDPS", "RDPS"];
 
 export default function RosterPage() {
@@ -25,7 +27,7 @@ export default function RosterPage() {
   const [q, setQ] = useState("");
   const [role, setRole] = useState<string>("");
   const [classId, setClassId] = useState<string>("");
-  const [status, setStatus] = useState<"" | "active" | "inactive">("");
+  const [status, setStatus] = useState<StatusFilter>("");
 
   // data
   const [classes, setClasses] = useState<ClassRow[]>([]);
@@ -98,8 +100,9 @@ export default function RosterPage() {
         });
         return next;
       });
-    } catch (e: any) {
-      setErr(e.message || "Failed to load roster");
+    } catch (e: unknown) {
+      const m = e instanceof Error ? e.message : String(e);
+      setErr(m || "Failed to load roster");
     } finally {
       setLoading(false);
     }
@@ -123,12 +126,16 @@ export default function RosterPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ playerId: p.id, active: nextActive }),
       });
-      const j = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      const j = (await r.json().catch(() => ({}))) as Record<string, unknown>;
+      if (!r.ok)
+        throw new Error(
+          (typeof j.error === "string" && j.error) || `HTTP ${r.status}`,
+        );
       setMsg(`${p.name} ${nextActive ? "re" : "de"}activated.`);
       await loadRoster();
-    } catch (e: any) {
-      setErr(e.message || "Update failed");
+    } catch (e: unknown) {
+      const m = e instanceof Error ? e.message : String(e);
+      setErr(m || "Update failed");
     } finally {
       setBusyId(null);
       setTimeout(() => setMsg(null), 1500);
@@ -148,12 +155,16 @@ export default function RosterPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ playerId: p.id, ...patch }),
       });
-      const j = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      const j = (await r.json().catch(() => ({}))) as Record<string, unknown>;
+      if (!r.ok)
+        throw new Error(
+          (typeof j.error === "string" && j.error) || `HTTP ${r.status}`,
+        );
       await loadRoster();
       setMsg("Saved.");
-    } catch (e: any) {
-      setErr(e.message || "Save failed");
+    } catch (e: unknown) {
+      const m = e instanceof Error ? e.message : String(e);
+      setErr(m || "Save failed");
     } finally {
       setBusyId(null);
       setTimeout(() => setMsg(null), 1200);
@@ -178,16 +189,21 @@ export default function RosterPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ids, active: nextActive }),
       });
-      const j = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
-      const changed = j.changed ?? ids.length;
+      const j = (await r.json().catch(() => ({}))) as Record<string, unknown>;
+      if (!r.ok)
+        throw new Error(
+          (typeof j.error === "string" && j.error) || `HTTP ${r.status}`,
+        );
+      const changed =
+        typeof j.changed === "number" ? j.changed : ids.length;
       setMsg(
         `${nextActive ? "Reactivated" : "Deactivated"} ${changed} player(s).`,
       );
       await loadRoster();
       setSelectedIds(new Set());
-    } catch (e: any) {
-      setErr(e.message || "Bulk update failed");
+    } catch (e: unknown) {
+      const m = e instanceof Error ? e.message : String(e);
+      setErr(m || "Bulk update failed");
     } finally {
       setBulkBusy(false);
       setTimeout(() => setMsg(null), 1500);
@@ -278,7 +294,7 @@ export default function RosterPage() {
             <label className="text-sm text-neutral-400">Status</label>
             <select
               value={status}
-              onChange={(e) => setStatus(e.target.value as any)}
+              onChange={(e) => setStatus(e.target.value as StatusFilter)}
             >
               <option value="">Any</option>
               <option value="active">Active only</option>

@@ -26,6 +26,7 @@ export async function POST(req: Request) {
     where: { id: { in: ids } },
     select: { id: true, name: true, active: true },
   });
+
   if (players.length === 0) {
     return NextResponse.json({
       ok: true,
@@ -35,31 +36,32 @@ export async function POST(req: Request) {
     });
   }
 
-  // Only change those that actually differ
+  // Only modify those that actually change
   const targets = players.filter((p) => p.active !== active);
 
   await prisma.$transaction(async (tx) => {
     for (const p of targets) {
       await tx.player.update({ where: { id: p.id }, data: { active } });
-      try {
-        const actionKey = active ? "PLAYER_REACTIVATED" : "PLAYER_DEACTIVATED";
-        const action = (AuditAction as any)[actionKey];
-        const targetType = (TargetType as any)["PLAYER"];
-        if (action && targetType) {
-          await tx.auditLog.create({
-            data: {
-              action,
-              targetType,
-              targetId: `player:${p.id}`,
-              before: { active: !active },
-              after: { active },
-              actorDisplay: getActorDisplay(),
-              meta: { playerName: p.name },
-            },
-          });
-        }
-      } catch {
-        // swallow audit enum mismatches
+
+      // Optional audit (guarded in case your schema doesn't define these enum members)
+      const actionKey = active ? "PLAYER_REACTIVATED" : "PLAYER_DEACTIVATED";
+      const action =
+        (AuditAction as unknown as Record<string, AuditAction>)[actionKey];
+      const targetType =
+        (TargetType as unknown as Record<string, TargetType>)["PLAYER"];
+
+      if (action && targetType) {
+        await tx.auditLog.create({
+          data: {
+            action,
+            targetType,
+            targetId: `player:${p.id}`,
+            before: { active: !active },
+            after: { active },
+            actorDisplay: getActorDisplay(),
+            meta: { playerName: p.name },
+          },
+        });
       }
     }
   });

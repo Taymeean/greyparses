@@ -1,18 +1,18 @@
+// src/app/api/sr-choice/route.ts
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { readSession, getActorDisplay } from "@/lib/auth";
 import { getCurrentWeekStartNY, formatWeekLabelNY } from "@/lib/week";
+import { Prisma } from "@prisma/client";
 
-const LOG_NOTES_MAX = 128;
+const LOG_NOTES_MAX = 96 as const;
 
-const NOTES_MAX = 80 as const;
 const Body = z.object({
   playerId: z.number().int().positive(),
   lootItemId: z.number().int().positive().nullable().optional(), // allow clearing
   bossId: z.number().int().positive().nullable().optional(),
-  // SRChoice can keep a bigger cap; SRLog will clamp to 128
-  notes: z.string().max(NOTES_MAX).optional(),
+  notes: z.string().max(LOG_NOTES_MAX).optional(),
 });
 
 const UNIVERSAL_TYPES = new Set(["ACCESSORIES", "TRINKET", "WEAPON"]);
@@ -43,7 +43,7 @@ export async function POST(req: Request) {
     );
 
   // 3) Player & class
-  const player = await prisma.player.findUnique({
+  const p = await prisma.player.findUnique({
     where: { id: playerId },
     select: {
       id: true,
@@ -55,9 +55,10 @@ export async function POST(req: Request) {
       },
     },
   });
-  if (!player || !player.active) {
+  if (!p || !p.active) {
     return NextResponse.json({ error: "invalid_player" }, { status: 404 });
   }
+  const player = p; // narrowed non-null
 
   // 4) If an SR row exists and is locked, block edits
   const existingRow = await prisma.sRChoice.findUnique({
@@ -104,21 +105,21 @@ export async function POST(req: Request) {
       );
     }
 
-    // Compute Tier flag
+    // Strict boolean: compute Tier flag
     isTier =
       itemType === TIER_TYPE ||
-      (tierPrefix && loot.name.startsWith(tierPrefix));
+      (!!tierPrefix && loot.name.startsWith(tierPrefix));
   } else {
     // clearing SR -> isTier false
     isTier = false;
   }
 
   // 6) Validate boss (if provided)
-  let boss: { id: number; name: string } | null = null;
+  let boss: { id: number; name: string; raidId: number } | null = null;
   if (bossId !== null) {
     boss = await prisma.boss.findUnique({
       where: { id: bossId },
-      select: { id: true, name: true, raidId: true },
+      select: { id: true, name: true, raidId: true }, // include raidId for cross-raid guard
     });
     if (!boss || boss.raidId !== week.raidId) {
       return NextResponse.json({ error: "invalid_boss" }, { status: 400 });
@@ -139,7 +140,7 @@ export async function POST(req: Request) {
     }
   }
 
-  // 8) Transaction: upsert SR choice, sync SR log, audit
+  // 8) Transaction: upsert SR choice, log, audit
   const result = await prisma.$transaction(async (tx) => {
     // previous SR (for before)
     const prev = await tx.sRChoice.findUnique({
@@ -147,14 +148,13 @@ export async function POST(req: Request) {
       select: { lootItemId: true, bossId: true, notes: true, isTier: true },
     });
 
-    // upsert SRChoice
+    // upsert
     const updated = await tx.sRChoice.upsert({
       where: { weekId_playerId: { weekId: week.id, playerId } },
       update: {
         lootItemId,
         bossId,
-        notes:
-          typeof notes === "string" ? notes.slice(0, NOTES_MAX) : undefined,
+        notes: typeof notes === "string" ? notes : undefined,
         isTier,
       },
       create: {
@@ -162,34 +162,19 @@ export async function POST(req: Request) {
         playerId,
         lootItemId,
         bossId,
-        notes:
-          typeof notes === "string" ? notes.slice(0, NOTES_MAX) : undefined,
+        notes: typeof notes === "string" ? notes : undefined,
         isTier,
       },
     });
 
-    // SRLog mirrors current SR for the week (unique week+player)
-    if (updated.lootItemId == null) {
-      await tx.sRLog.deleteMany({ where: { weekId: week.id, playerId } });
-    } else {
-      const logNotes =
-        typeof updated.notes === "string" && updated.notes.length > 0
-          ? updated.notes.slice(0, LOG_NOTES_MAX)
-          : null;
-
-      await tx.sRLog.upsert({
-        where: { weekId_playerId: { weekId: week.id, playerId } },
-        update: {
-          lootItemId: updated.lootItemId,
-          isTier, // derived above, not client-provided
-          notes: logNotes,
-        },
-        create: {
+    // SR log (lightweight snapshot)
+    // SR log (only if there is an item; SRLog.lootItemId is non-nullable)
+    if (updated.lootItemId != null) {
+      await tx.sRLog.create({
+        data: {
           weekId: week.id,
           playerId,
           lootItemId: updated.lootItemId,
-          isTier,
-          notes: logNotes,
         },
       });
     }
@@ -208,19 +193,21 @@ export async function POST(req: Request) {
       return bits.join(" • ");
     }
 
-    const before = prev
+    const beforeJson:
+      | Prisma.InputJsonValue
+      | Prisma.NullableJsonNullValueInput = prev
       ? {
-          lootItemId: prev.lootItemId,
-          bossId: prev.bossId,
-          notes: prev.notes,
+          lootItemId: prev.lootItemId ?? null,
+          bossId: prev.bossId ?? null,
+          notes: prev.notes ?? null,
           isTier: prev.isTier,
         }
-      : null;
+      : Prisma.DbNull;
 
-    const after = {
-      lootItemId: updated.lootItemId,
-      bossId: updated.bossId,
-      notes: updated.notes,
+    const afterJson: Prisma.InputJsonValue = {
+      lootItemId: updated.lootItemId ?? null,
+      bossId: updated.bossId ?? null,
+      notes: updated.notes ?? null,
       isTier: updated.isTier,
     };
 
@@ -232,8 +219,8 @@ export async function POST(req: Request) {
         targetType: "SR_CHOICE",
         targetId: `week:${week.id}/player:${playerId}`,
         weekId: week.id,
-        before,
-        after,
+        before: beforeJson,
+        after: afterJson,
         actorDisplay: getActorDisplay(),
         meta: {
           display: buildDisplay(),

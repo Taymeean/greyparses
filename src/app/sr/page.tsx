@@ -1,3 +1,4 @@
+// src/app/sr/page.tsx
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -109,8 +110,9 @@ export default function SRPage() {
               .catch(() => setLootOptions([]));
           }
         }
-      } catch (e: any) {
-        setError(e?.message || "Failed to load");
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        setError(msg || "Failed to load");
       } finally {
         setLoading(false);
       }
@@ -188,8 +190,14 @@ export default function SRPage() {
           notes: editNotes ? editNotes.slice(0, NOTES_MAX) : undefined,
         }),
       });
-      const j = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(j?.error || `HTTP ${res.status}`);
+      const j = (await res.json().catch(() => ({}))) as Record<
+        string,
+        unknown
+      >;
+      if (!res.ok) {
+        const msg = typeof j.error === "string" ? j.error : `HTTP ${res.status}`;
+        throw new Error(msg);
+      }
 
       setOkMsg("Saved.");
 
@@ -197,8 +205,9 @@ export default function SRPage() {
       const srRes = await fetch("/api/sr", { cache: "no-store" });
       const srJ: WeekSR = await srRes.json();
       setWeek(srJ);
-    } catch (e: any) {
-      setError(e.message || "Save failed");
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setError(msg || "Save failed");
     } finally {
       setSaving(false);
       setTimeout(() => setOkMsg(null), 1500);
@@ -349,14 +358,14 @@ export default function SRPage() {
                             className="border rounded px-2 py-1 w-64"
                             value={editNotes}
                             onChange={(e) =>
-                              setEditNotes(e.target.value.slice(0, 80))
+                              setEditNotes(e.target.value.slice(0, NOTES_MAX))
                             }
                             disabled={locked}
                             placeholder="optional"
-                            maxLength={80}
+                            maxLength={NOTES_MAX}
                           />
                           <span className="text-[11px] text-neutral-400">
-                            {editNotes.length}/80
+                            {editNotes.length}/{NOTES_MAX}
                           </span>
                         </div>
                       ) : (
@@ -390,10 +399,7 @@ export default function SRPage() {
 
               {rowsForRender.length === 0 && (
                 <tr>
-                  <td
-                    colSpan={10}
-                    className="text-center text-neutral-400 py-8"
-                  >
+                  <td colSpan={10} className="text-center text-neutral-400 py-8">
                     No players
                   </td>
                 </tr>

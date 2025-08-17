@@ -1,25 +1,24 @@
 // src/app/api/audit/route.ts
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { AuditAction, TargetType } from "@prisma/client";
+import { AuditAction, TargetType, Prisma } from "@prisma/client";
 import { isOfficer } from "@/lib/auth";
 
-function s(q: URLSearchParams, k: string) {
+function s(q: URLSearchParams, k: string): string | null {
   const v = q.get(k);
   return v && v.trim() ? v.trim() : null;
 }
-function n(q: URLSearchParams, k: string) {
+function n(q: URLSearchParams, k: string): number | null {
   const v = q.get(k);
   if (!v) return null;
   const num = Number(v);
   return Number.isInteger(num) ? num : null;
 }
-function enumHas<T extends object>(e: T, key: string) {
+function enumHas<T extends object>(e: T, key: PropertyKey): key is keyof T {
   return Object.prototype.hasOwnProperty.call(e, key);
 }
 
 export async function GET(req: Request) {
-  // officer gate
   if (!isOfficer()) {
     return NextResponse.json({ error: "Officer only" }, { status: 403 });
   }
@@ -38,19 +37,21 @@ export async function GET(req: Request) {
     const limit = Math.min(Math.max(n(q, "limit") ?? 50, 1), 200);
     const cursorId = n(q, "cursor");
 
-    const where: any = {};
+    const where: Prisma.AuditLogWhereInput = {};
     if (action) {
-      if (!enumHas(AuditAction, action))
+      if (!enumHas(AuditAction, action)) {
         return NextResponse.json({ error: "Invalid action" }, { status: 400 });
-      where.action = action;
+      }
+      where.action = action as AuditAction;
     }
     if (targetType) {
-      if (!enumHas(TargetType, targetType))
+      if (!enumHas(TargetType, targetType)) {
         return NextResponse.json(
           { error: "Invalid targetType" },
           { status: 400 },
         );
-      where.targetType = targetType;
+      }
+      where.targetType = targetType as TargetType;
     }
     if (typeof weekId === "number") where.weekId = weekId;
     if (actor) where.actorDisplay = { contains: actor };
@@ -60,26 +61,25 @@ export async function GET(req: Request) {
       if (to) where.createdAt.lte = new Date(to);
     }
 
-    // only apply cursor if it exists
-    let cursorClause: any = {};
+    let cursorArgs: Pick<Prisma.AuditLogFindManyArgs, "cursor" | "skip"> = {};
     if (cursorId) {
       const exists = await prisma.auditLog.findUnique({
         where: { id: cursorId },
         select: { id: true },
       });
-      if (exists) cursorClause = { cursor: { id: cursorId }, skip: 1 };
+      if (exists) cursorArgs = { cursor: { id: cursorId }, skip: 1 };
     }
 
     const items = await prisma.auditLog.findMany({
       where,
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }], // stable
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: limit + 1,
-      ...cursorClause,
+      ...cursorArgs,
     });
 
     const nextCursor = items.length > limit ? items[limit].id : null;
     return NextResponse.json({ items: items.slice(0, limit), nextCursor });
-  } catch (err) {
+  } catch (err: unknown) {
     console.error("AUDIT_LIST_ERROR", err);
     return NextResponse.json({ error: "Internal error" }, { status: 500 });
   }

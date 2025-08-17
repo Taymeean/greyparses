@@ -1,33 +1,36 @@
-// src/app/api/bosses/[id]/loot/route.ts
+// src/app/api/loot/[id]/bosses/route.ts
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 
-export async function GET(
-  _req: Request,
-  { params }: { params: { id: string } },
-) {
-  const bossId = Number(params.id);
-  if (!Number.isInteger(bossId)) {
-    return NextResponse.json({ error: "Invalid boss id" }, { status: 400 });
+function getParam(ctx: unknown, key: string): string | null {
+  const params = (ctx as { params?: Record<string, string | string[]> }).params ?? {};
+  const raw = params[key];
+  if (raw == null) return null;
+  return Array.isArray(raw) ? raw[0] ?? null : raw;
+}
+
+export async function GET(_req: Request, ctx: unknown) {
+  const idStr = getParam(ctx, "id");
+  const lootItemId = Number(idStr);
+  if (!Number.isInteger(lootItemId)) {
+    return NextResponse.json({ error: "Invalid lootItem id" }, { status: 400 });
   }
 
-  const boss = await prisma.boss.findUnique({
-    where: { id: bossId },
-    select: { id: true, name: true },
-  });
-  if (!boss)
-    return NextResponse.json({ error: "Boss not found" }, { status: 404 });
-
+  // Find boss IDs that drop this item
   const drops = await prisma.lootDrop.findMany({
-    where: { bossId },
-    include: {
-      lootItem: { select: { id: true, name: true, type: true, slot: true } },
-    },
-    orderBy: { lootItem: { name: "asc" } },
+    where: { lootItemId },
+    select: { bossId: true },
+  });
+  const bossIds = Array.from(new Set(drops.map(d => d.bossId)));
+
+  if (bossIds.length === 0) return NextResponse.json([]);
+
+  const bosses = await prisma.boss.findMany({
+    where: { id: { in: bossIds } },
+    select: { id: true, name: true },
+    orderBy: { name: "asc" },
   });
 
-  return NextResponse.json({
-    boss,
-    loot: drops.map((d) => d.lootItem),
-  });
+  // SR page expects Boss[] (not wrapped)
+  return NextResponse.json(bosses);
 }

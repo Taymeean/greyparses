@@ -1,12 +1,9 @@
+// src/app/officer/page.tsx
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 type BossRow = { id: number; name: string; killed: boolean };
-type KillsPayload =
-  | BossRow[]
-  | { weekId?: number; label?: string; bosses?: BossRow[] }
-  | { items?: { bossId: number; name: string; killed: boolean }[] };
 
 function Spinner() {
   return (
@@ -16,6 +13,65 @@ function Spinner() {
     />
   );
 }
+
+/* ---------- type guards for /api/kills ---------- */
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null;
+}
+function isBossRowArray(v: unknown): v is BossRow[] {
+  return (
+    Array.isArray(v) &&
+    v.every(
+      (o) =>
+        isRecord(o) &&
+        typeof o.id === "number" &&
+        typeof o.name === "string" &&
+        typeof o.killed === "boolean",
+    )
+  );
+}
+function hasBossesArray(
+  v: unknown,
+): v is { bosses: BossRow[]; label?: string; weekId?: number } {
+  return isRecord(v) && Array.isArray(v.bosses) && isBossRowArray(v.bosses);
+}
+function hasItemsArray(
+  v: unknown,
+): v is {
+  items: { bossId: number; name: string; killed: boolean }[];
+  label?: string;
+  weekId?: number;
+} {
+  return (
+    isRecord(v) &&
+    Array.isArray(v.items) &&
+    v.items.every(
+      (o) =>
+        isRecord(o) &&
+        typeof o.bossId === "number" &&
+        typeof o.name === "string" &&
+        typeof o.killed === "boolean",
+    )
+  );
+}
+function normalizeBosses(payload: unknown): BossRow[] {
+  if (isBossRowArray(payload)) return payload;
+  if (hasBossesArray(payload)) return payload.bosses;
+  if (hasItemsArray(payload))
+    return payload.items.map((x) => ({
+      id: x.bossId,
+      name: x.name,
+      killed: x.killed,
+    }));
+  return [];
+}
+function extractLabel(payload: unknown): string | null {
+  if (isRecord(payload) && typeof payload.label === "string") return payload.label;
+  if (isRecord(payload) && isRecord(payload.week) && typeof payload.week.label === "string")
+    return payload.week.label as string;
+  return null;
+}
+/* ----------------------------------------------- */
 
 export default function OfficerPage() {
   const [isOfficer, setIsOfficer] = useState<boolean | null>(null);
@@ -35,21 +91,35 @@ export default function OfficerPage() {
   const [resetConfirm, setResetConfirm] = useState("");
   const [resetting, setResetting] = useState(false);
 
-  useEffect(() => {
-    checkOfficer().then((ok) => {
-      setIsOfficer(ok);
-      if (ok) void loadKills();
-    });
+  const loadKills = useCallback(async () => {
+    setLoadingKills(true);
+    setErr(null);
+    try {
+      const r = await fetch("/api/kills", { cache: "no-store" });
+      const j: unknown = await r.json();
+      const rows = normalizeBosses(j);
+      setBosses(rows);
+      setWeekLabel(extractLabel(j) ?? "Current Week");
+    } catch (e: unknown) {
+      const m = e instanceof Error ? e.message : String(e);
+      setErr(m || "Failed to load boss kills");
+    } finally {
+      setLoadingKills(false);
+    }
   }, []);
 
-  async function checkOfficer(): Promise<boolean> {
-    try {
-      const r = await fetch("/api/audit?limit=1", { cache: "no-store" });
-      return r.status !== 403;
-    } catch {
-      return false;
-    }
-  }
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await fetch("/api/audit?limit=1", { cache: "no-store" });
+        const ok = r.status !== 403;
+        setIsOfficer(ok);
+        if (ok) void loadKills();
+      } catch {
+        setIsOfficer(false);
+      }
+    })();
+  }, [loadKills]);
 
   async function loginOfficer(e: React.FormEvent) {
     e.preventDefault();
@@ -63,48 +133,19 @@ export default function OfficerPage() {
         body: JSON.stringify({ key: keyInput.trim() }),
       });
       if (!r.ok) {
-        const j = await r.json().catch(() => ({}));
-        throw new Error(j.error || `HTTP ${r.status}`);
+        const j = (await r.json().catch(() => ({}))) as Record<string, unknown>;
+        throw new Error((typeof j.error === "string" && j.error) || `HTTP ${r.status}`);
       }
       setIsOfficer(true);
       setMsg("Officer mode enabled.");
       setKeyInput("");
       await loadKills();
-    } catch (e: any) {
-      setErr(e.message || "Login failed");
+    } catch (e: unknown) {
+      const m = e instanceof Error ? e.message : String(e);
+      setErr(m || "Login failed");
     } finally {
       setBusy(false);
       setTimeout(() => setMsg(null), 1500);
-    }
-  }
-
-  function normalizeBosses(j: KillsPayload): BossRow[] {
-    if (Array.isArray(j)) return j;
-    if ("bosses" in (j as any) && Array.isArray((j as any).bosses))
-      return (j as any).bosses;
-    if ("items" in (j as any) && Array.isArray((j as any).items)) {
-      return (j as any).items.map((x: any) => ({
-        id: x.bossId,
-        name: x.name,
-        killed: x.killed,
-      }));
-    }
-    return [];
-  }
-
-  async function loadKills() {
-    setLoadingKills(true);
-    setErr(null);
-    try {
-      const r = await fetch("/api/kills", { cache: "no-store" });
-      const j = await r.json();
-      const rows = normalizeBosses(j);
-      setBosses(rows);
-      setWeekLabel((j as any)?.label ?? "Current Week");
-    } catch (e: any) {
-      setErr(e.message || "Failed to load boss kills");
-    } finally {
-      setLoadingKills(false);
     }
   }
 
@@ -117,12 +158,13 @@ export default function OfficerPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ bossId }),
       });
-      const j = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      const j = (await r.json().catch(() => ({}))) as Record<string, unknown>;
+      if (!r.ok) throw new Error((typeof j.error === "string" && j.error) || `HTTP ${r.status}`);
       await loadKills();
       setMsg(`Updated ${bossId}.`);
-    } catch (e: any) {
-      setErr(e.message || "Toggle failed");
+    } catch (e: unknown) {
+      const m = e instanceof Error ? e.message : String(e);
+      setErr(m || "Toggle failed");
     } finally {
       setTogglingId(null);
       setTimeout(() => setMsg(null), 1200);
@@ -139,11 +181,14 @@ export default function OfficerPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ lock: true }),
       });
-      const j = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
-      setMsg(`Locked (affected: ${j?.affected ?? "—"})`);
-    } catch (e: any) {
-      setErr(e.message || "Lock failed");
+      const j = (await r.json().catch(() => ({}))) as Record<string, unknown>;
+      if (!r.ok) throw new Error((typeof j.error === "string" && j.error) || `HTTP ${r.status}`);
+      const affected =
+        typeof j.affected === "number" ? j.affected : (j as { affected?: number }).affected ?? "—";
+      setMsg(`Locked (affected: ${affected})`);
+    } catch (e: unknown) {
+      const m = e instanceof Error ? e.message : String(e);
+      setErr(m || "Lock failed");
     } finally {
       setBusy(false);
       setTimeout(() => setMsg(null), 1500);
@@ -156,11 +201,16 @@ export default function OfficerPage() {
     setMsg(null);
     try {
       const r = await fetch("/api/lock/except-killed", { method: "POST" });
-      const j = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
-      setMsg(`Unlocked: ${j?.unlocked ?? 0}`);
-    } catch (e: any) {
-      setErr(e.message || "Unlock failed");
+      const j = (await r.json().catch(() => ({}))) as Record<string, unknown>;
+      if (!r.ok) throw new Error((typeof j.error === "string" && j.error) || `HTTP ${r.status}`);
+      const unlocked =
+        typeof j.unlocked === "number"
+          ? j.unlocked
+          : (j as { unlocked?: number }).unlocked ?? 0;
+      setMsg(`Unlocked: ${unlocked}`);
+    } catch (e: unknown) {
+      const m = e instanceof Error ? e.message : String(e);
+      setErr(m || "Unlock failed");
     } finally {
       setBusy(false);
       setTimeout(() => setMsg(null), 1500);
@@ -177,18 +227,20 @@ export default function OfficerPage() {
     setResetting(true);
     try {
       let r = await fetch("/api/reset-week", { method: "POST" });
-      if (r.status === 404)
-        r = await fetch("/api/week/reset", { method: "POST" });
-      const j = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
-
-      const newLabel = j?.label || j?.week?.label || "New week started";
+      if (r.status === 404) r = await fetch("/api/week/reset", { method: "POST" });
+      const j = (await r.json().catch(() => ({}))) as Record<string, unknown>;
+      if (!r.ok) throw new Error((typeof j.error === "string" && j.error) || `HTTP ${r.status}`);
+      const newLabel =
+        (typeof j.label === "string" && j.label) ||
+        (isRecord(j.week) && typeof j.week.label === "string" && j.week.label) ||
+        "New week started";
       setMsg(`Week reset: ${newLabel}`);
       setResetConfirm("");
       await loadKills();
       if (newLabel) setWeekLabel(newLabel);
-    } catch (e: any) {
-      setErr(e.message || "Reset failed");
+    } catch (e: unknown) {
+      const m = e instanceof Error ? e.message : String(e);
+      setErr(m || "Reset failed");
     } finally {
       setResetting(false);
       setTimeout(() => setMsg(null), 2000);
@@ -238,8 +290,8 @@ export default function OfficerPage() {
       <div className="panel panel-center max-w-xl">
         <div className="panel-title">Officer identity</div>
         <p className="badge mb-2">
-          Audits will show <code>officer:&lt;name&gt;</code>. If you’ve claimed
-          a character, we use that. Otherwise set an alias:
+          Audits will show <code>officer:&lt;name&gt;</code>. If you’ve claimed a character, we use
+          that. Otherwise set an alias:
         </p>
         <div className="flex gap-2">
           <input
@@ -277,11 +329,7 @@ export default function OfficerPage() {
       <div className="panel panel-center space-y-3">
         <div className="panel-title">SR Controls</div>
         <div className="flex gap-3 flex-wrap">
-          <button
-            onClick={lockAll}
-            disabled={busy}
-            className="btn inline-flex items-center gap-2"
-          >
+          <button onClick={lockAll} disabled={busy} className="btn inline-flex items-center gap-2">
             {busy ? (
               <>
                 <Spinner /> Working…
@@ -362,8 +410,8 @@ export default function OfficerPage() {
       >
         <div className="panel-title text-red-200 text-xl mb-1">Danger zone</div>
         <p className="text-[0.95rem] text-red-200/90 mb-3">
-          Reset Week archives the current SRs (via audit), starts a new week,
-          clears SR choices/notes, and resets boss kills.
+          Reset Week archives the current SRs (via audit), starts a new week, clears SR choices/notes,
+          and resets boss kills.
         </p>
 
         <div className="flex items-center justify-center gap-3">
@@ -387,15 +435,8 @@ export default function OfficerPage() {
 
       {/* Links */}
       <div className="badge">
-        Need detail? See{" "}
-        <a className="underline" href="/audit">
-          Audit
-        </a>{" "}
-        or{" "}
-        <a className="underline" href="/sr">
-          SR table
-        </a>
-        .
+        Need detail? See <a className="underline" href="/audit">Audit</a> or{" "}
+        <a className="underline" href="/sr">SR table</a>.
       </div>
     </div>
   );

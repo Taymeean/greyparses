@@ -7,6 +7,7 @@ export async function GET(req: Request) {
   const url = new URL(req.url);
   const classIdParam = url.searchParams.get("classId");
   const classId = classIdParam ? Number(classIdParam) : NaN;
+
   if (!Number.isInteger(classId)) {
     return NextResponse.json(
       { error: "classId query param is required (number)" },
@@ -15,11 +16,14 @@ export async function GET(req: Request) {
   }
 
   const cls = await prisma.class.findUnique({ where: { id: classId } });
-  if (!cls)
+  if (!cls) {
     return NextResponse.json({ error: "Class not found" }, { status: 404 });
+  }
 
+  // Include `slot` to satisfy filterLootForClass’ expected shape
   const items = await prisma.lootItem.findMany({
-    select: { id: true, name: true, type: true },
+    select: { id: true, name: true, type: true, slot: true },
+    orderBy: { name: "asc" },
   });
 
   const filtered = filterLootForClass(cls, items);

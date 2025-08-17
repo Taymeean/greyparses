@@ -1,20 +1,28 @@
+// src/app/claim/page.tsx
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 type ClassRow = { id: number; name: string };
 const ROLES = ["TANK", "HEALER", "MDPS", "RDPS"] as const;
+type Role = (typeof ROLES)[number];
+
+type MeSession = { playerId: number; name: string; role: Role };
+type Me = { authenticated: boolean; session?: MeSession };
+
+type ClaimResponse = {
+  player?: { id?: number; name?: string; role?: Role };
+  error?: string;
+};
+
 const NAME_MAX = 24;
 
 export default function ClaimPage() {
   const router = useRouter();
   const qs = useSearchParams();
 
-  const [me, setMe] = useState<{
-    authenticated: boolean;
-    session?: any;
-  } | null>(null);
+  const [me, setMe] = useState<Me | null>(null);
   const [classes, setClasses] = useState<ClassRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -22,7 +30,7 @@ export default function ClaimPage() {
 
   const [token, setToken] = useState("");
   const [name, setName] = useState("");
-  const [role, setRole] = useState<(typeof ROLES)[number]>("MDPS");
+  const [role, setRole] = useState<Role>("MDPS");
   const [classId, setClassId] = useState<number | "">("");
 
   // deactivate UI
@@ -38,12 +46,13 @@ export default function ClaimPage() {
 
   useEffect(() => {
     fetch("/api/me", { cache: "no-store" })
-      .then((r) => r.json())
+      .then((r) => r.json() as Promise<Me>)
       .then(setMe)
       .catch(() => setMe({ authenticated: false }));
+
     fetch("/api/classes", { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : Promise.reject()))
-      .then((rows: any[]) =>
+      .then((rows: Array<{ id: number; name: string }>) =>
         setClasses(rows.map((r) => ({ id: r.id, name: r.name }))),
       )
       .catch(() => setClasses([]));
@@ -88,12 +97,22 @@ export default function ClaimPage() {
           classId: Number(classId),
         }),
       });
-      const j = await res.json().catch(() => ({}));
+      const j = (await res.json().catch(() => ({}))) as ClaimResponse;
       if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
-      setOk({ name: j.player?.name || name.trim() });
-      setMe({ authenticated: true, session: j.player });
-    } catch (e: any) {
-      setErr(e.message || "Claim failed");
+      const claimedName = (j.player && j.player.name) || name.trim();
+      setOk({ name: claimedName });
+      setMe({
+        authenticated: true,
+        session: j.player
+          ? {
+              playerId: j.player.id ?? 0,
+              name: j.player.name ?? claimedName,
+              role: (j.player.role as Role) || role,
+            }
+          : undefined,
+      });
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : "Claim failed");
     } finally {
       setLoading(false);
     }
@@ -119,18 +138,18 @@ export default function ClaimPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ confirmName }),
       });
-      const j = await res.json().catch(() => ({}));
+      const j = (await res.json().catch(() => ({}))) as { error?: string };
       if (!res.ok) throw new Error(j.error || `HTTP ${res.status}`);
       setDeactMsg("Character deactivated. You are signed out.");
       setConfirmName("");
       setMe({ authenticated: false });
-    } catch (e: any) {
-      setDeactErr(e.message || "Deactivate failed");
+    } catch (e: unknown) {
+      setDeactErr(e instanceof Error ? e.message : "Deactivate failed");
     }
   }
 
   if (me?.authenticated && !ok) {
-    const currentName = me.session?.name as string | undefined;
+    const currentName = me.session?.name;
     return (
       <div className="max-w-3xl mx-auto px-4 space-y-6">
         <div className="flex items-center justify-between">
@@ -204,11 +223,7 @@ export default function ClaimPage() {
         </div>
 
         <p className="badge text-center">
-          Need the table?{" "}
-          <a className="underline" href="/sr">
-            SR
-          </a>
-          .
+          Need the table? <a className="underline" href="/sr">SR</a>.
         </p>
       </div>
     );

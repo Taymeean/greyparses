@@ -2,14 +2,15 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { isOfficer } from "@/lib/auth";
+import { Prisma, Role as PrismaRole } from "@prisma/client";
 
-const ROLES = new Set(["TANK", "HEALER", "MDPS", "RDPS"]);
+const ROLES = new Set<PrismaRole>(["TANK", "HEALER", "MDPS", "RDPS"]);
 
-function s(q: URLSearchParams, k: string) {
+function s(q: URLSearchParams, k: string): string | null {
   const v = q.get(k);
   return v && v.trim() ? v.trim() : null;
 }
-function n(q: URLSearchParams, k: string) {
+function n(q: URLSearchParams, k: string): number | null {
   const v = q.get(k);
   if (!v) return null;
   const num = Number(v);
@@ -25,16 +26,21 @@ export async function GET(req: Request) {
   const q = url.searchParams;
 
   const query = s(q, "q");
-  const role = s(q, "role");
+  const roleStr = s(q, "role");
+  const role =
+    roleStr && ROLES.has(roleStr as PrismaRole)
+      ? (roleStr as PrismaRole)
+      : undefined;
   const classId = n(q, "classId");
   const active = s(q, "active"); // "true" | "false" | null
 
-  const where: any = {};
-  if (query) where.name = { contains: query, mode: "insensitive" };
-  if (role && ROLES.has(role)) where.role = role;
-  if (typeof classId === "number") where.classId = classId;
-  if (active === "true") where.active = true;
-  if (active === "false") where.active = false;
+  const where: Prisma.PlayerWhereInput = {
+    ...(query ? { name: { contains: query } } : {}),
+    ...(role ? { role } : {}),
+    ...(typeof classId === "number" ? { classId } : {}),
+    ...(active === "true" ? { active: true } : {}),
+    ...(active === "false" ? { active: false } : {}),
+  };
 
   const rows = await prisma.player.findMany({
     where,

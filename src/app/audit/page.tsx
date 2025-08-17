@@ -1,3 +1,4 @@
+// src/app/audit/page.tsx
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -11,14 +12,28 @@ type AuditItem = {
   targetType: string;
   targetId: string | null;
   weekId: number | null;
-  before: any | null;
-  after: any | null;
-  meta: any | null;
+  before: Record<string, unknown> | null;
+  after: Record<string, unknown> | null;
+  meta: Record<string, unknown> | null;
 };
+
 type AuditResponse = { items: AuditItem[]; nextCursor: number | null };
 type Boss = { id: number; name: string };
 type Week = { id: number; label: string; startDate: string };
 type Player = { id: number; name: string };
+
+/* ---------- Utils ---------- */
+function isObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null;
+}
+function getStringField(
+  obj: Record<string, unknown> | null,
+  key: string,
+): string | null {
+  if (!obj) return null;
+  const v = obj[key];
+  return typeof v === "string" ? v : null;
+}
 
 /* ---------- Page ---------- */
 export default function AuditPage() {
@@ -94,7 +109,7 @@ export default function AuditPage() {
           const ws: Week[] = await wRes.json();
           setWeeks(ws);
           setWeekMap(Object.fromEntries(ws.map((w) => [w.id, w.label])));
-          if ((weekId as any) === "" && ws.length) setWeekId(ws[0].id);
+          if (weekId === "" && ws.length) setWeekId(ws[0].id);
         }
 
         await loadLogs({ reset: true, forceCursor: null });
@@ -117,7 +132,7 @@ export default function AuditPage() {
         cache: "no-store",
       });
       if (!res.ok) return;
-      const map = await res.json();
+      const map = (await res.json()) as Record<number, string>;
       setLootMap((prev) => ({ ...prev, ...map }));
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -129,7 +144,7 @@ export default function AuditPage() {
     forceCursor?: number | null;
   }) {
     const useWeek = opts?.forceWeekId !== undefined ? opts.forceWeekId : weekId;
-    const useCursor = opts?.reset ? null : (opts?.forceCursor ?? cursor);
+    const useCursor = opts?.reset ? null : opts?.forceCursor ?? cursor;
 
     setLoading(true);
     setErr(null);
@@ -155,8 +170,9 @@ export default function AuditPage() {
       setItems(j.items || []);
       setNextCursor(j.nextCursor ?? null);
       setCursor(useCursor ?? null);
-    } catch (e: any) {
-      setErr(e.message || "Failed to load audit logs");
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setErr(msg || "Failed to load audit logs");
     } finally {
       setLoading(false);
     }
@@ -356,10 +372,13 @@ export default function AuditPage() {
 function collectLootIds(items: AuditItem[]): number[] {
   const out = new Set<number>();
   for (const it of items) {
-    [it.before, it.after].forEach((obj) => {
-      if (obj && typeof obj === "object" && "lootItemId" in obj) {
-        const v = (obj as any).lootItemId;
-        if (typeof v === "number" && Number.isFinite(v)) out.add(v);
+    const candidates: Array<Record<string, unknown> | null> = [
+      it.before,
+      it.after,
+    ];
+    candidates.forEach((obj) => {
+      if (isObject(obj) && typeof obj["lootItemId"] === "number") {
+        out.add(obj["lootItemId"] as number);
       }
     });
   }
@@ -382,7 +401,7 @@ function parseActorDisplay(s: string | null | undefined): {
 
 function prettyValue(
   key: string,
-  val: any,
+  val: unknown,
   maps: {
     bossMap: Record<number, string>;
     lootMap: Record<number, string>;
@@ -391,28 +410,44 @@ function prettyValue(
   },
 ) {
   if (val == null) return "—";
+
+  const asId = (v: unknown): number | null => {
+    if (typeof v === "number") return v;
+    if (typeof v === "string") {
+      const n = Number(v);
+      return Number.isFinite(n) ? n : null;
+    }
+    return null;
+  };
+
   if (key === "bossId") {
-    const id = Number(val);
-    return maps.bossMap[id] ? `${maps.bossMap[id]} (#${id})` : `Boss #${id}`;
+    const id = asId(val);
+    return id != null && maps.bossMap[id]
+      ? `${maps.bossMap[id]} (#${id})`
+      : `Boss #${id ?? "?"}`;
   }
   if (key === "lootItemId") {
-    const id = Number(val);
-    return maps.lootMap[id] ? `${maps.lootMap[id]} (#${id})` : `Item #${id}`;
+    const id = asId(val);
+    return id != null && maps.lootMap[id]
+      ? `${maps.lootMap[id]} (#${id})`
+      : `Item #${id ?? "?"}`;
   }
   if (key === "playerId" && maps.playerMap) {
-    const id = Number(val);
-    return maps.playerMap[id]
+    const id = asId(val);
+    return id != null && maps.playerMap[id]
       ? `${maps.playerMap[id]} (#${id})`
-      : `Player #${id}`;
+      : `Player #${id ?? "?"}`;
   }
   if (key === "weekId" && maps.weekMap) {
-    const id = Number(val);
-    return maps.weekMap[id] ? `${maps.weekMap[id]} (#${id})` : `Week #${id}`;
+    const id = asId(val);
+    return id != null && maps.weekMap[id]
+      ? `${maps.weekMap[id]} (#${id})`
+      : `Week #${id ?? "?"}`;
   }
-  if (key === "isTier") return val ? "Y" : "N";
-  if (key === "locked") return val ? "Locked" : "Unlocked";
+  if (key === "isTier") return Boolean(val) ? "Y" : "N";
+  if (key === "locked") return Boolean(val) ? "Locked" : "Unlocked";
   if (Array.isArray(val)) return val.length ? `[${val.join(", ")}]` : "[]";
-  if (typeof val === "object") return JSON.stringify(val);
+  if (isObject(val)) return JSON.stringify(val);
   return String(val);
 }
 
@@ -434,8 +469,8 @@ function labelForKey(action: string, key: string) {
 }
 
 function diffPairs(
-  before: any,
-  after: any,
+  before: Record<string, unknown> | null,
+  after: Record<string, unknown> | null,
   action: string,
   maps: {
     bossMap: Record<number, string>;
@@ -450,8 +485,8 @@ function diffPairs(
   ]);
   const rows: { label: string; before?: string; after?: string }[] = [];
   keys.forEach((k) => {
-    const b = (before as any)?.[k];
-    const a = (after as any)?.[k];
+    const b = before ? before[k] : undefined;
+    const a = after ? after[k] : undefined;
     const same = JSON.stringify(b) === JSON.stringify(a);
     if (same) return;
     rows.push({
@@ -543,7 +578,7 @@ function SummaryLine({
   };
 }) {
   const act = friendlyAction(item.action);
-  const disp = (item.meta && (item.meta.display as string)) || "";
+  const disp = getStringField(item.meta, "display") ?? "";
   const diffs = diffPairs(item.before, item.after, item.action, maps);
   const short =
     disp ||
