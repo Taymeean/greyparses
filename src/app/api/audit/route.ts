@@ -19,7 +19,8 @@ function enumHas<T extends object>(e: T, key: PropertyKey): key is keyof T {
 }
 
 export async function GET(req: Request) {
-  if (!isOfficer()) {
+  const officer = await isOfficer();
+  if (!officer) {
     return NextResponse.json({ error: "Officer only" }, { status: 403 });
   }
 
@@ -46,10 +47,7 @@ export async function GET(req: Request) {
     }
     if (targetType) {
       if (!enumHas(TargetType, targetType)) {
-        return NextResponse.json(
-          { error: "Invalid targetType" },
-          { status: 400 },
-        );
+        return NextResponse.json({ error: "Invalid targetType" }, { status: 400 });
       }
       where.targetType = targetType as TargetType;
     }

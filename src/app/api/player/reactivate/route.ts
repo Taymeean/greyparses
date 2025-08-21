@@ -1,3 +1,4 @@
+// src/app/api/player/reactivate/route.ts
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
@@ -12,26 +13,32 @@ const Body = z
   .refine((d) => d.playerId || d.name, { message: "Provide playerId or name" });
 
 export async function POST(req: Request) {
-  if (!isOfficer())
+  const officer = await isOfficer();
+  if (!officer) {
     return NextResponse.json({ error: "Officer only" }, { status: 403 });
+  }
 
   const json = await req.json().catch(() => null);
   const parsed = Body.safeParse(json);
-  if (!parsed.success)
+  if (!parsed.success) {
     return NextResponse.json(
       { error: parsed.error.flatten() },
       { status: 400 },
     );
+  }
   const { playerId, name } = parsed.data;
 
   const player = await prisma.player.findFirst({
     where: playerId ? { id: playerId } : { name: name! },
     select: { id: true, active: true },
   });
-  if (!player)
+  if (!player) {
     return NextResponse.json({ error: "Player not found" }, { status: 404 });
+  }
 
-  if (player.active) return NextResponse.json({ ok: true, reactivated: false });
+  if (player.active) {
+    return NextResponse.json({ ok: true, reactivated: false });
+  }
 
   const updated = await prisma.player.update({
     where: { id: player.id },
@@ -47,7 +54,7 @@ export async function POST(req: Request) {
       weekId: null,
       before: { active: false },
       after: { active: true },
-      actorDisplay: getActorDisplay(), // officer
+      actorDisplay: await getActorDisplay(), // officer
     },
   });
 

@@ -19,6 +19,7 @@ type Choice = {
   boss: Boss | null;
   isTier: boolean;
   locked: boolean;
+  received?: boolean; // NEW: optional for backwards-compat
   notes: string;
   updatedAt: string;
 };
@@ -31,9 +32,11 @@ type Row = {
   active?: boolean; // hidden if false
 };
 
-type WeekSR = { weekId: number; label: string; rows: Row[] };
+// NOTE: rows can be absent briefly; treat it as []
+type WeekSR = { weekId: number; label: string; rows?: Row[] };
 type Me = {
   authenticated: boolean;
+  officer?: boolean; // NEW
   session?: { playerId: number; name: string; role: string };
 };
 
@@ -73,6 +76,9 @@ export default function SRPage() {
   const [editNotes, setEditNotes] = useState<string>("");
   const [tierOnly, setTierOnly] = useState(false);
 
+  // officer-only: track which playerId is toggling "received"
+  const [togglingReceivedFor, setTogglingReceivedFor] = useState<number | null>(null);
+
   // load me + week + bosses
   useEffect(() => {
     let alive = true;
@@ -95,7 +101,7 @@ export default function SRPage() {
         setBossOptions(bosses); // default: all until an item is chosen
 
         // prime my edit fields if I have a row
-        if (meJ.authenticated && srJ.rows) {
+        if (meJ.authenticated && Array.isArray(srJ.rows)) {
           const mine = srJ.rows.find(
             (r) => r.playerId === meJ.session?.playerId,
           );
@@ -124,15 +130,16 @@ export default function SRPage() {
 
   const myRow = useMemo(() => {
     if (!me?.authenticated || !week) return null;
-    return week.rows.find((r) => r.playerId === me.session!.playerId) || null;
+    const rows = week.rows ?? [];
+    return rows.find((r) => r.playerId === me.session!.playerId) ?? null;
   }, [me, week]);
 
   const locked = !!myRow?.choice?.locked;
 
   // rows to render (hide inactive) + optional Tier-only filter
   const rowsForRender = useMemo(() => {
-    if (!week) return [];
-    return week.rows.filter(
+    const rows = week?.rows ?? [];
+    return rows.filter(
       (r) => r.active !== false && (!tierOnly || !!r.choice?.isTier),
     );
   }, [week, tierOnly]);
@@ -214,6 +221,36 @@ export default function SRPage() {
     }
   }
 
+  async function toggleReceived(playerId: number, nextValue: boolean) {
+    if (!me?.officer) return; // only officers
+    setTogglingReceivedFor(playerId);
+    setError(null);
+    setOkMsg(null);
+    try {
+      const res = await fetch("/api/sr-choice/received", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ playerId, received: nextValue }),
+      });
+      const j = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+      if (!res.ok) {
+        const msg = typeof j.error === "string" ? j.error : `HTTP ${res.status}`;
+        throw new Error(msg);
+      }
+      setOkMsg("Updated.");
+      // refresh the table to reflect the new received flag
+      const srRes = await fetch("/api/sr", { cache: "no-store" });
+      const srJ: WeekSR = await srRes.json();
+      setWeek(srJ);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setError(msg || "Update failed");
+    } finally {
+      setTogglingReceivedFor(null);
+      setTimeout(() => setOkMsg(null), 1200);
+    }
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -270,6 +307,7 @@ export default function SRPage() {
                 <th>Boss</th>
                 <th>Tier</th>
                 <th>Locked</th>
+                <th>Received</th> {/* NEW */}
                 <th>Notes</th>
                 <th>Updated</th>
                 {myRow && <th />}
@@ -279,6 +317,8 @@ export default function SRPage() {
               {rowsForRender.map((r) => {
                 const isMe = myRow && r.playerId === myRow.playerId;
                 const c = r.choice;
+
+                const received = !!c?.received;
 
                 return (
                   <tr key={r.playerId}>
@@ -350,6 +390,38 @@ export default function SRPage() {
                     {/* Locked */}
                     <td>{c ? (c.locked ? "Locked" : "Unlocked") : "—"}</td>
 
+                    {/* Received (officer can toggle) */}
+                    <td>
+                      {me?.officer ? (
+                        <label className="inline-flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={received}
+                            onChange={(e) =>
+                              toggleReceived(r.playerId, e.target.checked)
+                            }
+                            disabled={
+                              togglingReceivedFor === r.playerId ||
+                              !c?.lootItem // only meaningful if an item is selected
+                            }
+                            className="accent-emerald-600"
+                            title={
+                              c?.lootItem
+                                ? "Mark as received"
+                                : "Select an item first"
+                            }
+                          />
+                          <span className="text-xs text-neutral-400">
+                            {togglingReceivedFor === r.playerId ? "Updating…" : ""}
+                          </span>
+                        </label>
+                      ) : received ? (
+                        "Yes"
+                      ) : (
+                        "No"
+                      )}
+                    </td>
+
                     {/* Notes */}
                     <td className="align-top">
                       {isMe ? (
@@ -399,7 +471,7 @@ export default function SRPage() {
 
               {rowsForRender.length === 0 && (
                 <tr>
-                  <td colSpan={10} className="text-center text-neutral-400 py-8">
+                  <td colSpan={11} className="text-center text-neutral-400 py-8">
                     No players
                   </td>
                 </tr>

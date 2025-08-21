@@ -7,7 +7,8 @@ import { getActorDisplay, isOfficer } from "@/lib/auth";
 
 export async function POST() {
   // officer gate
-  if (!isOfficer()) {
+  const officer = await isOfficer();
+  if (!officer) {
     return NextResponse.json({ error: "Officer only" }, { status: 403 });
   }
 
@@ -54,10 +55,10 @@ export async function POST() {
       targetType: "WEEK",
       targetId: `week:${week.id}`,
       weekId: week.id,
-      // IMPORTANT: use Prisma.DbNull instead of raw null for JSON column
+      // IMPORTANT: JSON column: use Prisma.DbNull instead of raw null
       before: Prisma.DbNull,
       after: { unlocked: affected, killedBossIds: killedIds },
-      actorDisplay: getActorDisplay(),
+      actorDisplay: await getActorDisplay(),
       meta: { unlocked: affected, killedBossIds: killedIds },
     },
   });

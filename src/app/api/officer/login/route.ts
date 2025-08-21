@@ -1,3 +1,4 @@
+// src/app/api/officer/login/route.ts
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
@@ -30,8 +31,16 @@ export async function POST(req: Request) {
   }
 
   const res = NextResponse.json({ ok: true });
-  // Set both common cookie names to be safe
-  res.cookies.set(OFFICER_COOKIE, "1", { path: "/", httpOnly: true });
-  res.cookies.set("officer", "1", { path: "/", httpOnly: true });
+  // Set both names for back-compat
+  res.cookies.set(OFFICER_COOKIE, "1", {
+    path: "/",
+    httpOnly: true,
+    sameSite: "lax",
+  });
+  res.cookies.set("officer", "1", {
+    path: "/",
+    httpOnly: true,
+    sameSite: "lax",
+  });
   return res;
 }

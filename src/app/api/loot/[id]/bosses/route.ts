@@ -4,10 +4,10 @@ import { prisma } from "@/lib/db";
 
 export async function GET(
   _req: Request,
-  { params }: { params: { id: string } },
+  ctx: { params: Promise<{ id: string }> },
 ) {
-  const lootItemId = Number(params.id);
-  if (!Number.isInteger(lootItemId) || lootItemId <= 0) {
+  const { id } = await ctx.params;
+  const lootItemId = Number(id);  if (!Number.isInteger(lootItemId) || lootItemId <= 0) {
     return NextResponse.json(
       { error: "Invalid loot item id" },
       { status: 400 },

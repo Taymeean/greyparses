@@ -8,10 +8,12 @@ import { AuditAction } from "@prisma/client";
 const Body = z.object({ bossId: z.number().int().positive() });
 
 export async function POST(req: Request) {
-  if (!isOfficer()) {
-    return NextResponse.json({ error: "Officer only" }, { status: 403 });
+  const officer = await isOfficer();
+  if (!officer) {
+      return NextResponse.json({ error: "Officer only" }, { status: 403 });
   }
 
+  const session = await readSession();
   const json = await req.json().catch(() => null);
   const parsed = Body.safeParse(json);
   if (!parsed.success) {
@@ -69,7 +71,6 @@ export async function POST(req: Request) {
   }
 
   // Audit
-  const s = readSession();
   await prisma.auditLog.create({
     data: {
       action: AuditAction.BOSS_KILL_TOGGLED,
@@ -78,10 +79,10 @@ export async function POST(req: Request) {
       weekId: week.id,
       before,
       after,
-      actorDisplay: getActorDisplay(),
+      actorDisplay: await getActorDisplay(),
       meta: {
         display: `Boss kill toggled • ${boss.name} • ${after.killed ? "killed" : "alive"} • week ${week.label}`,
-        actorPlayerId: s?.playerId ?? null,
+        actorPlayerId: session?.playerId ?? null,
         bossId,
       },
     },

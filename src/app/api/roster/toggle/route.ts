@@ -11,7 +11,8 @@ const Body = z.object({
 });
 
 export async function POST(req: Request) {
-  if (!isOfficer()) {
+  const officer = await isOfficer();
+  if (!officer) {
     return NextResponse.json({ error: "Officer only" }, { status: 403 });
   }
 
@@ -64,7 +65,7 @@ export async function POST(req: Request) {
         targetId: `player:${playerId}`,
         before: { active: prev.active },
         after: { active: updated.active },
-        actorDisplay: getActorDisplay(),
+        actorDisplay: await getActorDisplay(),
         meta: { playerName: updated.name },
       },
     });

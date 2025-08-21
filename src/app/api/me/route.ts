@@ -6,14 +6,17 @@ export const dynamic = "force-dynamic"; // never statically optimize this route
 export const revalidate = 0;
 
 export async function GET() {
-  const s = readSession();
-  const officer = isOfficer();
+  const [session, officer, actorDisplay] = await Promise.all([
+    readSession(),
+    isOfficer(),
+    getActorDisplay(),
+  ]);
 
   const res = NextResponse.json({
-    authenticated: !!s,
-    session: s ?? null,
+    authenticated: !!session,
+    session: session ?? null,
     officer,
-    actorDisplay: getActorDisplay(),
+    actorDisplay,
   });
 
   // hard no-cache to avoid stale headers in any environment

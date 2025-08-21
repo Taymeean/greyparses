@@ -11,7 +11,8 @@ import { getActorDisplay, isOfficer } from "@/lib/auth";
 
 export async function POST() {
   // officer gate
-  if (!isOfficer()) {
+  const officer = await isOfficer();
+  if (!officer) {
     return NextResponse.json({ error: "Officer only" }, { status: 403 });
   }
 
@@ -69,7 +70,7 @@ export async function POST() {
         nextLabel: nextWeek.label,
         created,
       },
-      actorDisplay: getActorDisplay(),
+      actorDisplay: await getActorDisplay(),
     },
   });
 

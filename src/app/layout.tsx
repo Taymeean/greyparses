@@ -9,14 +9,13 @@ export const metadata = {
   description: "SR tracker",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  // Server-side cookie reads (no client hooks needed)
-  const session = readSession();
-  const officer = isOfficer();
+  // Server-side cookie reads (Next 15: helpers are async)
+  const [session, officer] = await Promise.all([readSession(), isOfficer()]);
 
   // nicer status label
   const status = officer

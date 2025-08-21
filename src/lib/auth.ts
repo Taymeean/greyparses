@@ -1,9 +1,16 @@
+// src/lib/auth.ts
 import { cookies } from "next/headers";
 import crypto from "node:crypto";
 import type { Role } from "@prisma/client";
 
-export const COOKIE_NAME = "gp_sess"; // member session
-export const OFFICER_COOKIE = "gp_officer"; // officer flag cookie
+export const COOKIE_NAME = "gp_sess";          // member session (not used directly below but kept for parity)
+export const OFFICER_COOKIE = "gp_officer";    // officer flag cookie ("1" means true)
+
+// Back-compat cookie names
+const MEMBER_COOKIE_NEW = "gp_member";
+const MEMBER_COOKIE_OLD = "member";
+const OFFICER_FALLBACK = "officer";
+const OFFICER_NAME = "gp_officer_name";
 
 const SECRET = process.env.SESSION_SECRET ?? "dev-secret";
 
@@ -13,6 +20,18 @@ function b64u(buf: Buffer) {
 }
 function signData(data: string) {
   return crypto.createHmac("sha256", SECRET).update(data).digest("base64url");
+}
+function tryParseJson<T>(raw: string | null): T | null {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    try {
+      return JSON.parse(decodeURIComponent(raw)) as T;
+    } catch {
+      return null;
+    }
+  }
 }
 
 // ===== member session (player) =====
@@ -30,80 +49,74 @@ export function verifySession(token: string): SessionPayload | null {
   const [v, data, sig] = parts;
   const expected = signData(`${v}.${data}`);
   try {
-    if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected)))
+    if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) {
       return null;
+    }
   } catch {
     return null;
   }
   try {
-    return JSON.parse(
-      Buffer.from(data, "base64url").toString("utf8"),
-    ) as SessionPayload;
+    return JSON.parse(Buffer.from(data, "base64url").toString("utf8")) as SessionPayload;
   } catch {
     return null;
   }
 }
 
-// --- PATCH: make member cookie robust ---
-export function readSession() {
-  const c = cookies();
+/**
+ * Read member session from cookies.
+ * Returns a typed SessionPayload when available, otherwise null.
+ * Next 15: cookies() is async, so this is async too.
+ */
+export async function readSession(): Promise<SessionPayload | null> {
+  const c = await cookies();
+  const raw =
+    c.get(MEMBER_COOKIE_NEW)?.value ??
+    c.get(MEMBER_COOKIE_OLD)?.value ??
+    null;
 
-  // Prefer our new cookie; accept old name for compatibility
-  const raw = c.get("gp_member")?.value ?? c.get("member")?.value ?? null;
-
-  if (!raw) return null;
-
-  // Some runtimes URL-encode cookie values; try both
-  try {
-    return JSON.parse(raw);
-  } catch {
-    try {
-      return JSON.parse(decodeURIComponent(raw));
-    } catch {
-      return null;
-    }
+  // Accept plain JSON, URI-encoded JSON, or signed token via verifySession
+  const parsed = tryParseJson<SessionPayload>(raw);
+  if (parsed && typeof parsed.playerId === "number" && typeof parsed.name === "string") {
+    return parsed;
   }
+  if (raw) {
+    const verified = verifySession(raw);
+    if (verified) return verified;
+  }
+  return null;
 }
 
 // ===== officer cookie =====
-// opaque, signed value; no identity, just "officer ok"
-function officerMarker(): string {
-  // stable HMAC so we can verify without DB
-  return signData("officer:marker:v1");
+// Note: current app logic treats officer cookie as a simple "1"/truthy flag.
+export async function isOfficer(): Promise<boolean> {
+  const c = await cookies();
+  return (
+    c.get(OFFICER_COOKIE)?.value === "1" ||
+    c.get(OFFICER_FALLBACK)?.value === "1"
+  );
 }
 
-// --- PATCH: recognize either officer cookie name ---
-export function isOfficer() {
-  const c = cookies();
-  return c.get("gp_officer")?.value === "1" || c.get("officer")?.value === "1";
-}
+/**
+ * Returns a display string indicating the acting user.
+ * - If officer: "officer:Name" (from session if present, else OFFICER_NAME alias, else "officer")
+ * - If player:  "player:Name"
+ * - Else:      "anonymous"
+ */
+export async function getActorDisplay(): Promise<string> {
+  const c = await cookies();
+  const sessionRaw =
+    c.get(MEMBER_COOKIE_NEW)?.value ??
+    c.get(MEMBER_COOKIE_OLD)?.value ??
+    null;
 
-// Use player session if present, even for officers.
-// Fall back to a manual alias, then plain "officer".
-export function getActorDisplay() {
-  const c = cookies();
+  const sess = tryParseJson<Partial<SessionPayload>>(sessionRaw);
 
-  // read player session (new + old cookie names)
-  const raw = c.get("gp_member")?.value ?? c.get("member")?.value ?? null;
+  const officer =
+    c.get(OFFICER_COOKIE)?.value === "1" ||
+    c.get(OFFICER_FALLBACK)?.value === "1";
 
-  let sess: { playerId?: number; name?: string } | null = null;
-  if (raw) {
-    try {
-      sess = JSON.parse(raw);
-    } catch {
-      try {
-        sess = JSON.parse(decodeURIComponent(raw));
-      } catch {
-        /* ignore */
-      }
-    }
-  }
-
-  const isOfficer =
-    c.get("gp_officer")?.value === "1" || c.get("officer")?.value === "1";
-
-  if (isOfficer) {
-    const alias = c.get("gp_officer_name")?.value; // optional manual alias
+  if (officer) {
+    const alias = c.get(OFFICER_NAME)?.value || null;
     if (sess?.name) return `officer:${sess.name}`;
     if (alias) return `officer:${alias}`;
     return "officer";
@@ -112,11 +125,11 @@ export function getActorDisplay() {
   return sess?.name ? `player:${sess.name}` : "anonymous";
 }
 
-// Keep your existing readSession()/isOfficer() as-is.
-// If you want, tweak your header to show both when applicable:
-// officer + player name at the same time.
-
-// helper to set the officer cookie value in the login route
+// Optional: produce an HMAC marker if you later want to switch from "1" flags
+// to a signed opaque value. Not used by isOfficer() right now.
+function officerMarker(): string {
+  return signData("officer:marker:v1");
+}
 export function signedOfficerCookieValue(): string {
   return officerMarker();
 }

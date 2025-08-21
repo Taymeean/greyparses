@@ -6,7 +6,8 @@ import { Prisma, AuditAction } from "@prisma/client";
 import { getActorDisplay, isOfficer } from "@/lib/auth";
 
 export async function POST(req: Request) {
-  if (!isOfficer()) {
+  const officer = await isOfficer();
+  if (!officer) {
     return NextResponse.json({ error: "Officer only" }, { status: 403 });
   }
 
@@ -42,7 +43,7 @@ export async function POST(req: Request) {
       // JSON columns: use Prisma.DbNull instead of raw null
       before: Prisma.DbNull,
       after: { locked: lock, affected: count },
-      actorDisplay: getActorDisplay(),
+      actorDisplay: await getActorDisplay(),
       meta: { affected: count },
     },
   });

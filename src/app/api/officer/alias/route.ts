@@ -1,3 +1,4 @@
+// src/app/api/officer/alias/route.ts
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
@@ -13,12 +14,13 @@ export async function POST(req: Request) {
   res.cookies.set("gp_officer_name", p.data.name, {
     path: "/",
     httpOnly: true,
+    sameSite: "lax",
   });
   return res;
 }
 
 export async function DELETE() {
   const res = NextResponse.json({ ok: true });
-  res.cookies.set("gp_officer_name", "", { path: "/", maxAge: 0 });
+  res.cookies.set("gp_officer_name", "", { path: "/", maxAge: 0, sameSite: "lax" });
   return res;
 }

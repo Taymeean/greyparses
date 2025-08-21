@@ -16,7 +16,8 @@ const Body = z
   });
 
 export async function PATCH(req: Request) {
-  if (!isOfficer()) {
+  const officer = await isOfficer();
+  if (!officer) {
     return NextResponse.json({ error: "Officer only" }, { status: 403 });
   }
 
@@ -99,7 +100,7 @@ export async function PATCH(req: Request) {
         targetId: `player:${playerId}`,
         before: { role: prev.role, classId: prev.classId },
         after: { role: updated.role, classId: updated.class?.id ?? null },
-        actorDisplay: getActorDisplay(),
+        actorDisplay: await getActorDisplay(),
         meta: { playerName: updated.name },
       },
     });

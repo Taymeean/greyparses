@@ -48,6 +48,7 @@ enum AuditAction {
   INVITE_CLAIMED
   PLAYER_DEACTIVATED
   PLAYER_REACTIVATED
+  SR_ITEM_RECEIVED_TOGGLED
 }
 
 enum TargetType {
@@ -151,6 +152,7 @@ model SRChoice {
   bossId     Int? // optional by design
   isTier     Boolean  @default(false)
   locked     Boolean  @default(false)
+  received   Boolean  @default(false)
   notes      String?
   updatedAt  DateTime @updatedAt
 

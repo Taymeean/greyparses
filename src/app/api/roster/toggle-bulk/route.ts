@@ -11,7 +11,8 @@ const Body = z.object({
 });
 
 export async function POST(req: Request) {
-  if (!isOfficer()) {
+  const officer = await isOfficer();
+  if (!officer) {
     return NextResponse.json({ error: "Officer only" }, { status: 403 });
   }
 
@@ -39,6 +40,9 @@ export async function POST(req: Request) {
   // Only modify those that actually change
   const targets = players.filter((p) => p.active !== active);
 
+  // Resolve actor display once to avoid N cookie reads
+  const actorDisplay = await getActorDisplay();
+
   await prisma.$transaction(async (tx) => {
     for (const p of targets) {
       await tx.player.update({ where: { id: p.id }, data: { active } });
@@ -58,7 +62,7 @@ export async function POST(req: Request) {
             targetId: `player:${p.id}`,
             before: { active: !active },
             after: { active },
-            actorDisplay: getActorDisplay(),
+            actorDisplay,
             meta: { playerName: p.name },
           },
         });

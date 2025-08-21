@@ -13,7 +13,8 @@ const BodySchema = z.object({
 
 export async function POST(req: Request) {
   // officer gate
-  if (!isOfficer()) {
+  const officer = await isOfficer();
+  if (!officer) {
     return NextResponse.json({ error: "Officer only" }, { status: 403 });
   }
 
@@ -72,7 +73,7 @@ export async function POST(req: Request) {
         weekId: week.id,
         before: existing ? { killed: existing.killed } : Prisma.DbNull,
         after: { killed },
-        actorDisplay: getActorDisplay(),
+        actorDisplay: await getActorDisplay(),
         // If you want actor playerId here, reintroduce readSession() later.
         // For now, avoid the undefined variable `s`.
         // meta: { actorPlayerId: readSession()?.playerId ?? null },

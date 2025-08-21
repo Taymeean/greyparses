@@ -70,12 +70,14 @@ export async function POST(req: Request) {
   }
 
   // 5) Validate loot item (if provided), compute isTier
-  let loot: {
-    id: number;
-    name: string;
-    type: string;
-    slot: string | null;
-  } | null = null;
+  let loot:
+    | {
+        id: number;
+        name: string;
+        type: string;
+        slot: string | null;
+      }
+    | null = null;
   let isTier = false;
 
   if (lootItemId !== null) {
@@ -167,7 +169,6 @@ export async function POST(req: Request) {
       },
     });
 
-    // SR log (lightweight snapshot)
     // SR log (only if there is an item; SRLog.lootItemId is non-nullable)
     if (updated.lootItemId != null) {
       await tx.sRLog.create({
@@ -211,7 +212,8 @@ export async function POST(req: Request) {
       isTier: updated.isTier,
     };
 
-    const sess = readSession();
+    const sess = await readSession();
+    const actorDisplay = await getActorDisplay();
 
     await tx.auditLog.create({
       data: {
@@ -221,7 +223,7 @@ export async function POST(req: Request) {
         weekId: week.id,
         before: beforeJson,
         after: afterJson,
-        actorDisplay: getActorDisplay(),
+        actorDisplay,
         meta: {
           display: buildDisplay(),
           lootItemId: updated.lootItemId ?? null,

@@ -1,3 +1,4 @@
+// src/app/api/player/deactivate/route.ts
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
@@ -9,14 +10,16 @@ const Body = z.object({
 });
 
 export async function POST(req: Request) {
-  const session = readSession();
-  if (!session)
+  const session = await readSession();
+  if (!session) {
     return NextResponse.json({ error: "Not signed in" }, { status: 401 });
+  }
 
   const json = await req.json().catch(() => null);
   const parsed = Body.safeParse(json);
-  if (!parsed.success)
+  if (!parsed.success) {
     return NextResponse.json({ error: "Bad request" }, { status: 400 });
+  }
 
   const { confirmName } = parsed.data;
 
@@ -32,8 +35,9 @@ export async function POST(req: Request) {
     where: { id: session.playerId },
     select: { id: true, active: true },
   });
-  if (!player)
+  if (!player) {
     return NextResponse.json({ error: "Player not found" }, { status: 404 });
+  }
   if (!player.active) {
     // already inactive — still clear cookie for good measure
     const res = NextResponse.json({ ok: true, deactivated: false });
@@ -55,7 +59,7 @@ export async function POST(req: Request) {
       weekId: null,
       before: { active: true },
       after: { active: false },
-      actorDisplay: getActorDisplay(), // should be player:<name>
+      actorDisplay: await getActorDisplay(), // should be player:<name>
     },
   });
 
